@@ -38,7 +38,7 @@ public class Players {
     private String userName;
 
     @OneToOne
-    @JoinColumn(name = "player_info_id", referencedColumnName = "id")
+    @JoinColumn(name = "playerInfoId", referencedColumnName = "id")
     private PlayerInfo playerInfo;
 
     @Column(name="inventory")
@@ -87,6 +87,10 @@ public class Players {
     @Enumerated(EnumType.STRING)
     @Column(name = "role") 
     private RoleType role;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "initialTeamId")
+    private Team initialTeam;
 
     public enum RoleType {
         RETAILER,
