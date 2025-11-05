@@ -33,4 +33,18 @@ public class GameSocketController {
         String username = principal.getName();
         gameService.placeOrder(gameId, username, payload.orderAmount());
     }
+
+    @MessageMapping("/room/{roomId}/placeOrder")
+    public void placeRoomOrder(@DestinationVariable String roomId,
+                               @Payload OrderPayloadDTO payload,
+                               Principal principal) {
+        
+        if (principal == null) {
+            log.error("Cannot place room order: user is not authenticated.");
+            return;
+        }
+        
+        String username = principal.getName();
+        gameService.submitRoomOrder(roomId, username, payload.orderAmount());
+    }
 }
