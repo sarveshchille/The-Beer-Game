@@ -5,8 +5,7 @@ import com.sun.net.httpserver.HttpServer;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpExchange;
 
-// Imports for our game logic
-import com.example.beergameapi.model.GameConfig;
+
 import com.example.beergameapi.model.Player;
 import com.example.beergameapi.service.GameEngine;
 
