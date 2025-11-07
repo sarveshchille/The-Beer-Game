@@ -10,6 +10,8 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
 import lombok.Data;
@@ -31,12 +33,19 @@ public class Game {
     
     @Column(name="createdAt",nullable = false)
     private LocalDateTime createdAt;
+ 
+    @Column(name="finishedAt")
+    private LocalDateTime finishedAt;
 
     @OneToMany(mappedBy = "game",cascade = CascadeType.ALL,fetch = FetchType.LAZY)
     private List<Players> players;
 
     @Column(name="festive")
     private boolean festiveWeek;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "gameRoomId")
+    private GameRoom gameRoom;
 
 public enum GameStatus{
 
