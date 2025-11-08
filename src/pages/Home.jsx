@@ -5,7 +5,6 @@ import Gallery from "../Components/Gallery";
 import Testimonials from "../Components/Testimonials";
 import Footer from "../Components/Footer";
 import Navbar from "../Components/Navbar";
-import JoinLobby from "../Components/JoinLobby";
 export default function Home() {
   return (
     <div className="page home-page">

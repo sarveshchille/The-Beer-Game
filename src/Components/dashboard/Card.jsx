@@ -1,6 +1,10 @@
 import { useState } from "react";
+import { sendOrder } from "../../services/game-service";
 
 export default function Card() {
+  const userRole = localStorage.getItem("role");
+ 
+
   const [orderQuantities, setOrderQuantities] = useState({
     Retailer: 4,
     Wholesaler: 4,
@@ -8,25 +12,29 @@ export default function Card() {
     Factory: 4
   });
 
+ 
+  
 
   const increaseOrder = (role) => {
-    setOrderQuantities((prev) => ({
-      ...prev,
-      [role]: prev[role] + 1
-    }));
+    setOrderQuantities((prev) => {
+      const newQty = prev[role] + 1;
+      sendOrder(role, newQty);
+      return { ...prev, [role]: newQty };
+    });
   };
 
+
   const decreaseOrder = (role) => {
-    setOrderQuantities((prev) => ({
-      ...prev,
-      [role]: Math.max(0, prev[role] - 1) 
-    }));
+    setOrderQuantities((prev) => {
+      const newQty = Math.max(0, prev[role] - 1);
+      sendOrder(role, newQty);
+      return { ...prev, [role]: newQty };
+    });
   };
 
   return (
     <div className="card-container">
-
-      {["Retailer", "Wholesaler", "Distributor", "Factory"].map((role) => (
+      {[userRole].map((role) => (
         <div key={role} className="card-item">
 
           <div className="card-top">
@@ -34,6 +42,7 @@ export default function Card() {
             <h3>{role}</h3>
           </div>
 
+          {/* Inventory & Backlog — will connect to backend later */}
           <div className="card-stats">
             <div>
               <p>Inventory</p>
@@ -45,6 +54,7 @@ export default function Card() {
             </div>
           </div>
 
+          {/* Order Controls */}
           <div className="card-order">
             <button onClick={() => decreaseOrder(role)}>-</button>
             <span>{orderQuantities[role]}</span>
@@ -52,11 +62,8 @@ export default function Card() {
           </div>
 
           <p className="card-cost">Cost: $0.00</p>
-
         </div>
       ))}
-      
-
     </div>
   );
 }

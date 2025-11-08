@@ -1,24 +1,34 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from "../context/authContext";
-
+import { loginUser } from "../services/user-service";
 import "../styles.css";
+
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { login } = useAuth();
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    login(username);
-    navigate('/');
+
+    try {
+      const data = await loginUser({ username, password });
+
+      // Save login info
+      localStorage.setItem("token", data.token);
+      localStorage.setItem("username", data.username);
+
+      navigate('/');
+    } catch (err) {
+      console.log(err);
+      alert("Invalid username or password");
+    }
   };
 
   return (
     <div className="login-container">
-      <h1 className="login-title">Welcome Back 👋</h1>
+      <h1 className="login-title">Welcome Back</h1>
 
       <form className="login-form" onSubmit={handleSubmit}>
         <div className="input-group">
