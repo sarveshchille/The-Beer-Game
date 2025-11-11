@@ -34,6 +34,7 @@ public class GameStateSubscriber implements MessageListener {
         }
     }
 
+    @SuppressWarnings("null")
     @Override
     public void onMessage(@NonNull Message message, @NonNull byte[] pattern) {
         try {
