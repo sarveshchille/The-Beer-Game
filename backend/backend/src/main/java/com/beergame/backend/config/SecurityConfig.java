@@ -86,6 +86,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // Your rules here are perfect
                         .requestMatchers("/auth/**").permitAll()
+                        .requestMatchers("/ping").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.OPTIONS, "/**").permitAll()
                         .anyRequest().authenticated())
                 .sessionManagement(session -> session.disable()) // Great!
