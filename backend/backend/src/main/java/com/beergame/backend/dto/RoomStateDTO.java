@@ -18,14 +18,13 @@ public class RoomStateDTO {
         dto.setRoomStatus(room.getStatus());
 
         dto.setCurrentWeek(
-            room.getGames().isEmpty() ? 0 : room.getGames().get(0).getCurrentWeek()
-        );
+                room.getGames().isEmpty() ? 0 : room.getGames().get(0).getCurrentWeek());
 
         List<PlayerAssignmentDTO> playerStates = room.getTeams().stream()
                 .flatMap(team -> team.getPlayers().stream())
                 .map(PlayerAssignmentDTO::fromPlayer)
                 .collect(Collectors.toList());
-        
+
         dto.setPlayers(playerStates);
         return dto;
     }

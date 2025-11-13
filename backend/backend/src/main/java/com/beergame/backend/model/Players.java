@@ -18,7 +18,6 @@ import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 import lombok.Data;
 
-
 // customer order             orderplacing
 // bavkorder                  
 // inventory
@@ -27,55 +26,55 @@ import lombok.Data;
 // weeklycost
 @Data
 @Entity
-@Table(name="players")
+@Table(name = "players")
 public class Players {
 
     @Id
-    @GeneratedValue(strategy=GenerationType.IDENTITY)
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name="userName", nullable = false) 
+    @Column(name = "userName", nullable = false)
     private String userName;
 
     @OneToOne
     @JoinColumn(name = "playerInfoId", referencedColumnName = "id")
     private PlayerInfo playerInfo;
 
-    @Column(name="inventory")
+    @Column(name = "inventory")
     private int inventory;
 
-    @Column(name="backOrder")
+    @Column(name = "backOrder")
     private int backOrder;
 
-    @Column(name="currentOrder")
-    private int currentOrder; 
+    @Column(name = "currentOrder")
+    private int currentOrder;
 
-    @Column(name="weeklyCost")
+    @Column(name = "weeklyCost")
     private double weeklyCost;
 
-    @Column(name="totalCost") 
+    @Column(name = "totalCost")
     private double totalCost;
 
-    @Column(name="ready")
+    @Column(name = "ready")
     private boolean isReadyForOrder;
 
-    @Column(name="outgoingDelivery")
-    private int outgoingDelivery; 
+    @Column(name = "outgoingDelivery")
+    private int outgoingDelivery;
 
-    @Column(name="lastOrderReceived")
-    private int lastOrderReceived; 
+    @Column(name = "lastOrderReceived")
+    private int lastOrderReceived;
 
-    @Column(name="lastShipmentReceived")
-    private int lastShipmentReceived; 
+    @Column(name = "lastShipmentReceived")
+    private int lastShipmentReceived;
 
-    @Column(name="orderArrivingNextWeek")
-    private int orderArrivingNextWeek; 
+    @Column(name = "orderArrivingNextWeek")
+    private int orderArrivingNextWeek;
 
-    @Column(name="incomingShipment")
-    private int incomingShipment; 
-    
-    @Column(name="shipmentArrivingWeekAfterNext")
-    private int shipmentArrivingWeekAfterNext; 
+    @Column(name = "incomingShipment")
+    private int incomingShipment;
+
+    @Column(name = "shipmentArrivingWeekAfterNext")
+    private int shipmentArrivingWeekAfterNext;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "game_id")
@@ -85,7 +84,7 @@ public class Players {
     private List<GameTurn> turnHistory;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "role") 
+    @Column(name = "role")
     private RoleType role;
 
     @ManyToOne(fetch = FetchType.LAZY)

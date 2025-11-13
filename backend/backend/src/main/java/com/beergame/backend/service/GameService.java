@@ -17,6 +17,7 @@ import com.beergame.backend.repository.PlayerRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -43,13 +44,14 @@ public class GameService {
     private final RoomAdvancementService roomAdvancementService;
 
     private GameService self;
+
     @Autowired
+    @Lazy
     public void setSelf(GameService self) {
         this.self = self;
     }
 
-
-    public Game createGame( String creatorUsername) { 
+    public Game createGame(String creatorUsername) {
         playerInfoRepository.findByUserName(creatorUsername)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
@@ -57,7 +59,7 @@ public class GameService {
         game.setGameStatus(Game.GameStatus.LOBBY);
         game.setCurrentWeek(1);
         game.setCreatedAt(LocalDateTime.now());
-        
+
         log.info("Creating new game. ID will be generated on save.");
         Game savedGame = gameRepository.save(game);
         log.info("Created new game with id: {}", savedGame.getId());
@@ -80,12 +82,12 @@ public class GameService {
         player.setUserName(playerInfo.getUserName());
         player.setPlayerInfo(playerInfo);
         player.setRole(role);
-        
+
         player.setInventory(GameConfig.INITIAL_INVENTORY);
         player.setBackOrder(0);
         player.setTotalCost(0);
         player.setWeeklyCost(0);
-        
+
         if (player.getRole() == Players.RoleType.RETAILER) {
             player.setOrderArrivingNextWeek(GameConfig.getCustomerDemand(1));
         } else {
@@ -93,10 +95,10 @@ public class GameService {
         }
         player.setIncomingShipment(GameConfig.INITIAL_PIPELINE_LEVEL);
         player.setShipmentArrivingWeekAfterNext(GameConfig.INITIAL_PIPELINE_LEVEL);
-        
+
         player.setGame(game);
-        
-        playerRepository.save(player); 
+
+        playerRepository.save(player);
         log.info("Player {} joined game {} as {}", username, gameId, role);
 
         game.getPlayers().add(player);
@@ -107,29 +109,29 @@ public class GameService {
     public void placeOrder(String gameId, String username, int orderAmount) {
         Game game = gameRepository.findById(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found"));
-        
+
         Players player = playerRepository.findByGameAndPlayerInfoUserName(game, username)
                 .orElseThrow(() -> new RuntimeException("Player not in this game"));
 
-        if(player.isReadyForOrder()) {
+        if (player.isReadyForOrder()) {
             log.warn("Player {} already submitted order for week {}", username, game.getCurrentWeek());
-            return; 
+            return;
         }
 
-        player.setCurrentOrder(orderAmount < 0 ? 0 : orderAmount); 
+        player.setCurrentOrder(orderAmount < 0 ? 0 : orderAmount);
         player.setReadyForOrder(true);
         playerRepository.save(player);
         log.info("Player {} placed order of {} for week {}", username, orderAmount, game.getCurrentWeek());
 
-        broadcastGameState(gameId); 
+        broadcastGameState(gameId);
 
         List<Players> players = game.getPlayers();
         if (players == null || players.size() < 4) {
-            return; 
+            return;
         }
 
         boolean allReady = players.stream().allMatch(Players::isReadyForOrder);
-        
+
         if (allReady) {
             log.info("All players are ready. Advancing turn for game {}", gameId);
             advanceTurn(gameId);
@@ -145,7 +147,7 @@ public class GameService {
     @Transactional // This logic MUST be transactional
     public void advanceTurn(String gameId) {
         Game game = gameRepository.findById(gameId).orElseThrow(() -> new RuntimeException("Game not found"));
-        
+
         // Ensure we have players
         if (game.getPlayers() == null || game.getPlayers().isEmpty()) {
             log.warn("Tried to advance game {} with no players.", gameId);
@@ -153,15 +155,15 @@ public class GameService {
         }
 
         int currentWeek = game.getCurrentWeek();
-        
+
         Map<Players.RoleType, Players> playerMap = game.getPlayers().stream()
-            .collect(Collectors.toMap(Players::getRole, Function.identity()));
+                .collect(Collectors.toMap(Players::getRole, Function.identity()));
 
         Players retailer = playerMap.get(Players.RoleType.RETAILER);
         Players wholesaler = playerMap.get(Players.RoleType.WHOLESALER);
         Players distributor = playerMap.get(Players.RoleType.DISTRIBUTOR);
         Players manufacturer = playerMap.get(Players.RoleType.MANUFACTURER);
-        
+
         // Check if all players exist
         if (retailer == null || wholesaler == null || distributor == null || manufacturer == null) {
             log.error("Game {} is in an invalid state: missing one or more roles.", gameId);
@@ -175,7 +177,7 @@ public class GameService {
             p.setInventory(p.getInventory() + shipmentReceived);
             p.setIncomingShipment(p.getShipmentArrivingWeekAfterNext());
             p.setShipmentArrivingWeekAfterNext(0);
-            
+
             int orderReceived = 0;
             if (p.getRole() == Players.RoleType.RETAILER) {
                 orderReceived = GameConfig.getCustomerDemand(currentWeek);
@@ -187,7 +189,7 @@ public class GameService {
 
             int totalDemand = orderReceived + p.getBackOrder();
             int shipmentSent = 0;
-            
+
             if (p.getInventory() >= totalDemand) {
                 shipmentSent = totalDemand;
                 p.setInventory(p.getInventory() - totalDemand);
@@ -202,7 +204,7 @@ public class GameService {
             double holdingCost = p.getInventory() * GameConfig.INVENTORY_HOLDING_COST;
             double backlogCost = p.getBackOrder() * GameConfig.BACKORDER_COST;
             double weeklyCost = holdingCost + backlogCost;
-            
+
             p.setWeeklyCost(weeklyCost);
             p.setTotalCost(p.getTotalCost() + weeklyCost);
         }
@@ -211,18 +213,18 @@ public class GameService {
         wholesaler.setOrderArrivingNextWeek(retailer.getCurrentOrder());
         distributor.setOrderArrivingNextWeek(wholesaler.getCurrentOrder());
         manufacturer.setOrderArrivingNextWeek(distributor.getCurrentOrder());
-        
+
         manufacturer.setShipmentArrivingWeekAfterNext(manufacturer.getCurrentOrder());
         distributor.setShipmentArrivingWeekAfterNext(manufacturer.getOutgoingDelivery());
         wholesaler.setShipmentArrivingWeekAfterNext(distributor.getOutgoingDelivery());
         retailer.setShipmentArrivingWeekAfterNext(wholesaler.getOutgoingDelivery());
-        
+
         // ** Loop 3: Log history & Reset Player **
         for (Players p : game.getPlayers()) {
             GameTurn turn = new GameTurn();
             turn.setWeekDay(currentWeek);
             turn.setPlayer(p);
-            
+
             turn.setOrderPlaced(p.getCurrentOrder());
             turn.setDemandRecieved(p.getLastOrderReceived());
             turn.setShipmentSent(p.getOutgoingDelivery());
@@ -231,24 +233,24 @@ public class GameService {
             turn.setBackOrderAtEndOfWeek(p.getBackOrder());
             turn.setWeeklyCost(p.getWeeklyCost());
             turn.setTotalCost(p.getTotalCost());
-            
+
             gameTurnRepository.save(turn);
 
             p.setReadyForOrder(false);
             playerRepository.save(p);
         }
-        
+
         game.setCurrentWeek(currentWeek + 1);
-        
+
         if (game.getCurrentWeek() > GameConfig.GAME_WEEKS) {
             game.setGameStatus(Game.GameStatus.FINISHED);
             game.setFinishedAt(LocalDateTime.now());
         }
-        
+
         gameRepository.save(game);
-        
+
         log.info("Game {} advanced to week {}", gameId, game.getCurrentWeek());
-        
+
         // If this game is part of a room, broadcast the room state.
         // Otherwise, broadcast the single game state.
         if (game.getGameRoom() != null) {
@@ -268,16 +270,16 @@ public class GameService {
     public void submitRoomOrder(String roomId, String username, int orderAmount) {
         GameRoom room = gameRoomRepository.findByIdWithAllData(roomId)
                 .orElseThrow(() -> new RuntimeException("Room not found: " + roomId));
-        
+
         if (room.getStatus() != GameRoom.RoomStatus.RUNNING) {
             throw new RuntimeException("This room is not running.");
         }
 
         Players player = room.getTeams().stream()
-            .flatMap(team -> team.getPlayers().stream())
-            .filter(p -> p.getPlayerInfo().getUserName().equals(username))
-            .findFirst()
-            .orElseThrow(() -> new RuntimeException("Player not found in this room"));
+                .flatMap(team -> team.getPlayers().stream())
+                .filter(p -> p.getPlayerInfo().getUserName().equals(username))
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("Player not found in this room"));
 
         if (player.isReadyForOrder()) {
             log.warn("Player {} already submitted order for room {}", username, roomId);
@@ -287,17 +289,17 @@ public class GameService {
         player.setCurrentOrder(orderAmount < 0 ? 0 : orderAmount);
         player.setReadyForOrder(true);
         playerRepository.save(player);
-        
+
         // Broadcast the "player is ready" state
-        broadcastRoomState(roomId, room); 
+        broadcastRoomState(roomId, room);
 
         boolean allReady = room.getTeams().stream()
-            .flatMap(team -> team.getPlayers().stream())
-            .allMatch(Players::isReadyForOrder);
+                .flatMap(team -> team.getPlayers().stream())
+                .allMatch(Players::isReadyForOrder);
 
         if (allReady) {
             log.info("All 16 players in room {} are ready. Advancing all 4 games in parallel.", roomId);
-            
+
             List<Game> games = room.getGames();
             CompletableFuture<Void> g1 = roomAdvancementService.advanceGame(games.get(0).getId());
             CompletableFuture<Void> g2 = roomAdvancementService.advanceGame(games.get(1).getId());
@@ -322,7 +324,7 @@ public class GameService {
                 .orElseThrow(() -> new RuntimeException("Room not found: " + roomId));
 
         boolean allGamesFinished = room.getGames().stream()
-            .allMatch(g -> g.getGameStatus() == Game.GameStatus.FINISHED);
+                .allMatch(g -> g.getGameStatus() == Game.GameStatus.FINISHED);
 
         if (allGamesFinished) {
             log.info("All games in room {} are finished. Setting room status to FINISHED.", roomId);
@@ -332,25 +334,25 @@ public class GameService {
 
         // Reset all 16 players for the next turn
         room.getTeams().stream()
-            .flatMap(team -> team.getPlayers().stream())
-            .forEach(player -> {
-                player.setReadyForOrder(false);
-                playerRepository.save(player);
-            });
-        
+                .flatMap(team -> team.getPlayers().stream())
+                .forEach(player -> {
+                    player.setReadyForOrder(false);
+                    playerRepository.save(player);
+                });
+
         gameRoomRepository.save(room);
-        
+
         // Broadcast the final new state to everyone in the room
         broadcastRoomState(roomId, room);
     }
-    
+
     private void broadcastGameState(String gameId) {
         Game game = gameRepository.findById(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found"));
-        
+
         GameStateDTO newState = GameStateDTO.fromGame(game);
         String channel = "game-updates:" + gameId;
-        
+
         log.info("Publishing new game state to Redis channel: {}", channel);
         redisTemplate.convertAndSend(channel, newState);
     }
@@ -358,7 +360,7 @@ public class GameService {
     private void broadcastRoomState(String roomId, GameRoom room) {
         RoomStateDTO roomState = RoomStateDTO.fromGameRoom(room);
         String channel = "room-updates:" + roomId;
-        
+
         log.info("Broadcasting state for room {} to Redis channel: {}", roomId, channel);
         redisTemplate.convertAndSend(channel, roomState);
     }

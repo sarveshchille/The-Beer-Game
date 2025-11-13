@@ -1,6 +1,5 @@
 package com.beergame.backend.model;
 
-
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -19,7 +18,7 @@ import lombok.Data;
 
 @Data
 @Entity
-@Table(name="gameRoom")
+@Table(name = "gameRoom")
 public class GameRoom {
 
     @Id
@@ -27,21 +26,21 @@ public class GameRoom {
     private String id;
 
     @Enumerated(EnumType.STRING)
-    @Column(name="status",nullable = false)
+    @Column(name = "status", nullable = false)
     private RoomStatus status;
 
-    @OneToMany(mappedBy = "gameRoom",cascade = CascadeType.ALL,fetch = FetchType.LAZY)
+    @OneToMany(mappedBy = "gameRoom", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private List<Team> teams;
-    
-    @OneToMany(mappedBy = "gameRoom",cascade = CascadeType.ALL,fetch = FetchType.LAZY)
+
+    @OneToMany(mappedBy = "gameRoom", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private List<Game> games;
 
-    @Column(name="finishedAt")
+    @Column(name = "finishedAt")
     private LocalDateTime finishedAt;
 
     public enum RoomStatus {
         WAITING,
-        RUNNING, 
+        RUNNING,
         FINISHED
     }
 

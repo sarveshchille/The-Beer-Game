@@ -23,17 +23,17 @@ public class GameConfig {
 
     // --- Cost Rules ---
     public static final double INVENTORY_HOLDING_COST = 0.75; // 75 cents per unit
-    public static final double BACKORDER_COST = 1.50;       // 1.5 per unit
+    public static final double BACKORDER_COST = 1.50; // 1.5 per unit
 
     /**
      * The base customer demand for the Retailer.
      * The first value is 20 to meet the Week 1 requirement.
      */
     private static final int[] BASE_DEMAND_SCHEDULE = {
-        // Week: 1   2   3   4   5   6   7   8   9  10  11  12  13
-                  20,  30,  40,  40,  40,  40,  60,  80,  80,  80,  80,  80,  60,
-        // Week: 14  15  16  17  18  19  20  21  22  23  24  25
-                   60,  80,  80,  80,  80,  80,  80,  80,  80,  80,  80,  80
+            // Week: 1 2 3 4 5 6 7 8 9 10 11 12 13
+            20, 30, 40, 40, 40, 40, 60, 80, 80, 80, 80, 80, 60,
+            // Week: 14 15 16 17 18 19 20 21 22 23 24 25
+            60, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80
     };
 
     /**
@@ -60,11 +60,13 @@ public class GameConfig {
     /**
      * Gets the customer demand for a given week.
      * This is ONLY for the Retailer.
+     * 
      * @param week The current week (1-based)
      * @return The customer demand for that week.
      */
     public static int getCustomerDemand(int week) {
-        if (week <= 0) return 0;
+        if (week <= 0)
+            return 0;
 
         // Check for festive week (but not for week 1)
         if (week > 1 && FESTIVE_WEEKS.contains(week)) {

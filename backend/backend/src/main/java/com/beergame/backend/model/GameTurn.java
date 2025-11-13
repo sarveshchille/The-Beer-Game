@@ -13,39 +13,39 @@ import lombok.Data;
 
 @Data
 @Entity
-@Table(name="gameturn")
+@Table(name = "gameturn")
 public class GameTurn {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name="weekDay")
+    @Column(name = "weekDay")
     private int weekDay;
 
-    @Column(name="orderPlaced")
+    @Column(name = "orderPlaced")
     private int orderPlaced;
 
-    @Column(name="demandRecieved")
-    private int demandRecieved; 
+    @Column(name = "demandRecieved")
+    private int demandRecieved;
 
-    @Column(name="shipmentSent")
-    private int shipmentSent; 
+    @Column(name = "shipmentSent")
+    private int shipmentSent;
 
-    @Column(name="shipmentRecieved")
+    @Column(name = "shipmentRecieved")
     private int shipmentRecieved;
 
-    @Column(name="inventoryAtEndOfWeek")
-    private int inventoryAtEndOfWeek; 
+    @Column(name = "inventoryAtEndOfWeek")
+    private int inventoryAtEndOfWeek;
 
-    @Column(name="backOrderAtEndOfWeek")
-    private int backOrderAtEndOfWeek; 
+    @Column(name = "backOrderAtEndOfWeek")
+    private int backOrderAtEndOfWeek;
 
-    @Column(name="weeklyCost")
-    private double weeklyCost; 
+    @Column(name = "weeklyCost")
+    private double weeklyCost;
 
-    @Column(name="totalCost") 
-    private double totalCost; 
+    @Column(name = "totalCost")
+    private double totalCost;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "player_id")

@@ -7,8 +7,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 import com.beergame.backend.model.Game;
 
-public interface GameRepository extends JpaRepository<Game,String> {
+public interface GameRepository extends JpaRepository<Game, String> {
 
-    List<Game> findByCreatedAt(Game.GameStatus status,LocalDateTime localDateTime);
+    List<Game> findByGameStatusAndCreatedAt(Game.GameStatus status, LocalDateTime localDateTime);
 
 }

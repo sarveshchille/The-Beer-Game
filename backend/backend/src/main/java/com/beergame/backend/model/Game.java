@@ -1,6 +1,7 @@
 package com.beergame.backend.model;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 import jakarta.persistence.CascadeType;
@@ -18,37 +19,37 @@ import lombok.Data;
 
 @Data
 @Entity
-@Table(name="Game")
+@Table(name = "Game")
 public class Game {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private String id;
-    
-    @Column(name="cuurentWeek")
+
+    @Column(name = "cuurentWeek")
     private int currentWeek;
 
-    @Column(name="gameStatus",nullable=false)
+    @Column(name = "gameStatus", nullable = false)
     private GameStatus gameStatus;
-    
-    @Column(name="createdAt",nullable = false)
+
+    @Column(name = "createdAt", nullable = false)
     private LocalDateTime createdAt;
- 
-    @Column(name="finishedAt")
+
+    @Column(name = "finishedAt")
     private LocalDateTime finishedAt;
 
-    @OneToMany(mappedBy = "game",cascade = CascadeType.ALL,fetch = FetchType.LAZY)
-    private List<Players> players;
+    @OneToMany(mappedBy = "game", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    private List<Players> players = new ArrayList<>();
 
-    @Column(name="festive")
+    @Column(name = "festive")
     private boolean festiveWeek;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "gameRoomId")
     private GameRoom gameRoom;
 
-public enum GameStatus{
+    public enum GameStatus {
 
-    LOBBY,IN_PROGRESS,FINISHED
-}
+        LOBBY, IN_PROGRESS, FINISHED
+    }
 }

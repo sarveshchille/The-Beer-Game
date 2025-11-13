@@ -16,28 +16,26 @@ import lombok.NoArgsConstructor;
 @Entity
 @AllArgsConstructor
 @NoArgsConstructor
-@Table(name="PlayerInfo")
+@Table(name = "PlayerInfo")
 public class PlayerInfo {
-     
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name="userName",nullable = false,unique = true)
+    @Column(name = "userName", nullable = false, unique = true)
     private String userName;
-    
-    @Column(name="emailId",nullable = false,unique = true)
+
+    @Column(name = "emailId", nullable = false, unique = true)
     private String emailId;
 
-    @Column(name="password",nullable = false)
+    @Column(name = "password", nullable = false)
     private String password;
 
-    @Column(name="createdAt",nullable = false)
+    @Column(name = "createdAt", nullable = false)
     private LocalDateTime createdAt;
 
-    @Column(name="tokenIssuedAt",nullable = false)
+    @Column(name = "tokenIssuedAt", nullable = false)
     private LocalDateTime tokenIssuedAt;
-
 
 }

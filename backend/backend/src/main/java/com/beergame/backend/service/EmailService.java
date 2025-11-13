@@ -19,28 +19,30 @@ public class EmailService {
     @Value("${spring.mail.username}")
     private String senderMail;
 
-    public void sendVerificationEmail(String toEmail,int token){
+    @SuppressWarnings("null")
+    public void sendVerificationEmail(String toEmail, int token) {
 
         MimeMessage mimeMessage = javaMailSender.createMimeMessage();
 
-        try{
-            MimeMessageHelper helper = new MimeMessageHelper(mimeMessage,true,"UTF-8");
+        try {
+            MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, true, "UTF-8");
 
             helper.setFrom(senderMail);
             helper.setTo(toEmail);
             helper.setSubject("Verification Token for the Beer Game");
 
             String htmlContent = "<h1>Welcome to Beer Game!</h1>"
-                            + "<p>Thank you for registering. Your Verification Token is as follows</p>"
-                           + "<p><a href=\"" + token + "\">Verify My Email</a></p>"
-                            + "<p>If you did not register, please ignore this email.</p>";
+                    + "<p>Thank you for registering.</p>"
+                    + "<p><b>Your OTP is: " + token + "</b></p>"
+                    + "<p>Enter this OTP in the app to verify your email.</p>"
+                    + "<br>"
+                    + "<p>If you did not register, please ignore this email.</p>";
 
-            helper.setText(htmlContent,true);  
+            helper.setText(htmlContent, true);
             javaMailSender.send(mimeMessage);
-            
+
             log.info("Email Sent to Player");
-        }
-        catch(Exception e){
+        } catch (Exception e) {
 
             log.error("Error sending mail to the player");
         }

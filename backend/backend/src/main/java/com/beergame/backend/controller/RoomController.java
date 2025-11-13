@@ -16,7 +16,6 @@ import org.springframework.web.bind.annotation.*;
 public class RoomController {
 
     private final RoomManagerService roomManagerService;
-    
 
     @PostMapping("/create")
     public ResponseEntity<GameRoom> createRoom() {
@@ -26,15 +25,14 @@ public class RoomController {
 
     @PostMapping("/{roomId}/join")
     public ResponseEntity<GameRoom> joinRoom(@PathVariable String roomId,
-                                             @RequestBody JoinRoomRequestDTO request,
-                                             @AuthenticationPrincipal UserDetails userDetails) {
-        
+            @RequestBody JoinRoomRequestDTO request,
+            @AuthenticationPrincipal UserDetails userDetails) {
+
         GameRoom room = roomManagerService.joinRoom(
-            roomId, 
-            request.teamName(), 
-            Players.RoleType.valueOf(request.role().toUpperCase()), 
-            userDetails.getUsername()
-        );
+                roomId,
+                request.teamName(),
+                Players.RoleType.valueOf(request.role().toUpperCase()),
+                userDetails.getUsername());
         return ResponseEntity.ok(room);
     }
 }

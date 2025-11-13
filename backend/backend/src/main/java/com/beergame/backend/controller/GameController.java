@@ -1,6 +1,5 @@
 package com.beergame.backend.controller;
 
-
 import com.beergame.backend.dto.GameStateDTO;
 import com.beergame.backend.dto.JoinGameRequestDTO;
 import com.beergame.backend.model.Game;
@@ -20,23 +19,24 @@ public class GameController {
 
     /**
      * Creates a new game lobby.
+     * 
      * @AuthenticationPrincipal injects the user details from the JWT.
      */
     @PostMapping("/create")
     public ResponseEntity<GameStateDTO> createGame(
-                                                   @AuthenticationPrincipal UserDetails userDetails) {
+            @AuthenticationPrincipal UserDetails userDetails) {
         if (userDetails == null) {
             return ResponseEntity.status(401).build(); // Should be handled by security config, but good practice
         }
-        
-        Game newGame = gameService.createGame( userDetails.getUsername());
+
+        Game newGame = gameService.createGame(userDetails.getUsername());
         return ResponseEntity.ok(GameStateDTO.fromGame(newGame));
     }
 
     @PostMapping("/{gameId}/join")
-    public ResponseEntity<GameStateDTO> joinGame(@PathVariable String gameId, 
-                                                 @RequestBody JoinGameRequestDTO request,
-                                                 @AuthenticationPrincipal UserDetails userDetails) {
+    public ResponseEntity<GameStateDTO> joinGame(@PathVariable String gameId,
+            @RequestBody JoinGameRequestDTO request,
+            @AuthenticationPrincipal UserDetails userDetails) {
         if (userDetails == null) {
             return ResponseEntity.status(401).build();
         }

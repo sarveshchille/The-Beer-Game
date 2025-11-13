@@ -23,12 +23,24 @@ import java.io.IOException;
 @RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
-    private final JwtUtils jwtUtils; 
-    private final UserDetailsService userDetailsService; 
+    private final JwtUtils jwtUtils;
+    private final UserDetailsService userDetailsService;
 
     @Override
-    protected void doFilterInternal(@NonNull HttpServletRequest request,@NonNull HttpServletResponse response,@NonNull FilterChain filterChain)
+    protected void doFilterInternal(@NonNull HttpServletRequest request,
+            @NonNull HttpServletResponse response,
+            @NonNull FilterChain filterChain)
             throws ServletException, IOException {
+
+        String path = request.getServletPath();
+
+        // ✅ Skip JWT auth for auth endpoints
+        // Skip auth for public paths AND all preflight OPTIONS requests
+        if (path.startsWith("/auth/") || request.getMethod().equals("OPTIONS")) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
         final String authHeader = request.getHeader("Authorization");
 
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
@@ -36,25 +48,23 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
 
-        try { 
-            String jwt = authHeader.substring(7); 
-
-            
+        try {
+            String jwt = authHeader.substring(7);
             String username = jwtUtils.extractUsername(jwt);
 
-            
-            if (username != null && SecurityContextHolder.getContext().getAuthentication() == null && jwtUtils.validateToken(jwt, username)) {
+            if (username != null &&
+                    SecurityContextHolder.getContext().getAuthentication() == null &&
+                    jwtUtils.validateToken(jwt, username)) {
+
                 UserDetails userDetails = userDetailsService.loadUserByUsername(username);
 
-                
                 UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
-                                                                         userDetails, null,
-                                                                        userDetails.getAuthorities());
+                        userDetails, null, userDetails.getAuthorities());
+
                 authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                 SecurityContextHolder.getContext().setAuthentication(authentication);
             }
         } catch (Exception ex) {
-
             logger.error("JWT Authentication Failed!!");
         }
 

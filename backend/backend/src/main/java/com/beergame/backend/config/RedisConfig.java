@@ -27,15 +27,19 @@ public class RedisConfig {
     }
 
     // This adapter connects our subscriber logic (GameStateSubscriber) to Redis
+    @SuppressWarnings("null")
     @Bean
     MessageListenerAdapter messageListenerAdapter(GameStateSubscriber subscriber) {
-        // "receiveMessage" is the method name in GameStateSubscriber that will be called
+        // "receiveMessage" is the method name in GameStateSubscriber that will be
+        // called
         return new MessageListenerAdapter(subscriber, "receiveMessage");
     }
 
     // This bean is for SUBSCRIBING to channels
+    @SuppressWarnings("null")
     @Bean
-    RedisMessageListenerContainer redisContainer(RedisConnectionFactory connectionFactory, MessageListenerAdapter messageListenerAdapter) {
+    RedisMessageListenerContainer redisContainer(RedisConnectionFactory connectionFactory,
+            MessageListenerAdapter messageListenerAdapter) {
         RedisMessageListenerContainer container = new RedisMessageListenerContainer();
         container.setConnectionFactory(connectionFactory);
         // Add a listener to a "topic" (channel pattern)
