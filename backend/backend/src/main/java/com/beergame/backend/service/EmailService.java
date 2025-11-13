@@ -44,7 +44,7 @@ public class EmailService {
             log.info("Email Sent to Player");
         } catch (Exception e) {
 
-            log.error("Error sending mail to the player");
+            log.error("Error sending mail to the player{}", e);
         }
     }
 
