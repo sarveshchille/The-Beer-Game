@@ -63,7 +63,7 @@ public class SecurityConfig {
         configuration.setAllowedOrigins(Arrays.asList(
                 "http://localhost:3000",
                 "http://localhost:5173",
-                "https://beergamefrontend3-6gb36lhk3-tushars-projects-57b354b0.vercel.app"));
+                "https://beergamefrontend3.vercel.app"));
 
         // These are standard settings
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
