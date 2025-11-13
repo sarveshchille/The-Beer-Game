@@ -22,6 +22,7 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -43,6 +44,9 @@ public class GameService {
     private final GameRoomRepository gameRoomRepository;
     private final RoomAdvancementService roomAdvancementService;
 
+    private static final String ALPHANUMERIC = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    private static final SecureRandom RANDOM = new SecureRandom();
+
     private GameService self;
 
     @Autowired
@@ -51,11 +55,24 @@ public class GameService {
         this.self = self;
     }
 
+    private String generateRandomId(int length) {
+        StringBuilder sb = new StringBuilder(length);
+        for (int i = 0; i < length; i++) {
+            sb.append(ALPHANUMERIC.charAt(RANDOM.nextInt(ALPHANUMERIC.length())));
+        }
+        return sb.toString();
+    }
+
     public Game createGame(String creatorUsername) {
         playerInfoRepository.findByUserName(creatorUsername)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
         Game game = new Game();
+        String newGameId = generateRandomId(10);
+        while(gameRepository.existsById(newGameId)) {
+            newGameId = generateRandomId(10);
+        }
+        game.setId(newGameId);
         game.setGameStatus(Game.GameStatus.LOBBY);
         game.setCurrentWeek(1);
         game.setCreatedAt(LocalDateTime.now());

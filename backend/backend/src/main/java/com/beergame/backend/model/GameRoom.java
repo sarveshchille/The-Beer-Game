@@ -9,8 +9,6 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
@@ -22,7 +20,7 @@ import lombok.Data;
 public class GameRoom {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
+    @Column(length=10)
     private String id;
 
     @Enumerated(EnumType.STRING)

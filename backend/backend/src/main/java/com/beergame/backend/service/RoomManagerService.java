@@ -10,9 +10,11 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Stream;
 
 @Service
 @RequiredArgsConstructor
@@ -24,11 +26,29 @@ public class RoomManagerService {
     private final TeamRepository teamRepository;
     private final PlayerRepository playerRepository;
     private final PlayerInfoRepository playerInfoRepository;
-    private final RedisTemplate<String, Object> redisTemplate; // <-- INJECT
+    private final RedisTemplate<String, Object> redisTemplate;
+    private final GameRepository gameRepository; // <-- NEEDED FOR BUG 2 FIX
+
+    private static final String ALPHANUMERIC = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    private static final SecureRandom RANDOM = new SecureRandom();
+
+    private String generateRandomId(int length) {
+        StringBuilder sb = new StringBuilder(length);
+        for (int i = 0; i < length; i++) {
+            sb.append(ALPHANUMERIC.charAt(RANDOM.nextInt(ALPHANUMERIC.length())));
+        }
+        return sb.toString();
+    }
 
     public GameRoom createRoom() {
-        // ... (your existing createRoom logic is fine) ...
         GameRoom room = new GameRoom();
+        
+        String newRoomId = generateRandomId(10);
+        while(gameRoomRepository.existsById(newRoomId)) {
+            newRoomId = generateRandomId(10);
+        }
+        
+        room.setId(newRoomId); // Manually set the new ID
         room.setStatus(GameRoom.RoomStatus.WAITING);
         GameRoom savedRoom = gameRoomRepository.save(room);
         log.info("Created new GameRoom with ID: {}", savedRoom.getId());
@@ -36,12 +56,9 @@ public class RoomManagerService {
     }
 
     public GameRoom joinRoom(String roomId, String teamName, Players.RoleType role, String username) {
-        // ... (your existing joinRoom logic is here) ...
-        // ... (find room, find user, find/create team, check duplicates, create player)
-        // ...
-
+        
         @SuppressWarnings("null")
-        GameRoom room = gameRoomRepository.findById(roomId)
+        GameRoom room = gameRoomRepository.findByIdWithAllData(roomId) // <-- FIX 1: Fetch all data at the start
                 .orElseThrow(() -> new RuntimeException("Room not found: " + roomId));
 
         if (room.getStatus() != GameRoom.RoomStatus.WAITING) {
@@ -68,13 +85,16 @@ public class RoomManagerService {
             throw new RuntimeException("Role " + role + " is already taken on team " + teamName);
         }
 
-        boolean playerExists = playerRepository.findAll().stream()
-                .anyMatch(p -> p.getInitialTeam() != null &&
-                        p.getInitialTeam().getGameRoom().getId().equals(roomId) &&
-                        p.getPlayerInfo().getId().equals(playerInfo.getId()));
+        // --- FIX 1 (CONTINUED): Efficient player check ---
+        // Check if this player is already in any team in *this* room
+        boolean playerExists = room.getTeams().stream()
+            .flatMap(t -> (t.getPlayers() != null ? t.getPlayers().stream() : Stream.empty()))
+            .anyMatch(p -> p.getPlayerInfo().getId().equals(playerInfo.getId()));
+        
         if (playerExists) {
             throw new RuntimeException("Player " + username + " is already in this room.");
         }
+        // --- End of Fix 1 ---
 
         Players player = new Players();
         player.setPlayerInfo(playerInfo);
@@ -82,20 +102,23 @@ public class RoomManagerService {
         player.setRole(role);
         player.setInitialTeam(team);
         playerRepository.save(player);
+        
+        // Add player to in-memory list for isRoomFull() check
+        if (team.getPlayers() == null) {
+            team.setPlayers(new ArrayList<>());
+        }
+        team.getPlayers().add(player);
 
         log.info("Player {} joined room {} on team {} as {}", username, roomId, teamName, role);
+        
+        broadcastRoomState(roomId, room); // Broadcast player join
 
-        // --- BROADCAST LOBBY UPDATE ---
-        // Fetch all data and broadcast the new lobby state
-        GameRoom finalRoom = gameRoomRepository.findByIdWithAllData(roomId).get();
-        broadcastRoomState(roomId, finalRoom); // Broadcast player join
-
-        if (isRoomFull(finalRoom)) {
-            startGame(finalRoom);
-            // startGame will broadcast the "Game Started" message
+        if (isRoomFull(room)) {
+            startGame(room);
+            // startGame will re-fetch data and broadcast the "Game Started" message
         }
 
-        return finalRoom;
+        return room;
     }
 
     private boolean isRoomFull(GameRoom room) {
@@ -108,18 +131,24 @@ public class RoomManagerService {
         log.info("Room {} is full! Starting game and shuffling players...", room.getId());
         room.setStatus(GameRoom.RoomStatus.RUNNING);
 
-        // ... (your existing shuffle logic is here) ...
-        // ... (create 4 games, perform Latin Square shuffle, assign players) ...
         List<Game> newGames = new ArrayList<>();
         for (int i = 0; i < 4; i++) {
             Game game = new Game();
+
+            // --- FIX 2: Manually generate IDs for the 4 games ---
+            String newGameId = generateRandomId(10);
+            while(gameRepository.existsById(newGameId)) {
+                newGameId = generateRandomId(10);
+            }
+            game.setId(newGameId);
+            // --- End of Fix 2 ---
             game.setGameStatus(Game.GameStatus.IN_PROGRESS);
             game.setCurrentWeek(1);
             game.setCreatedAt(LocalDateTime.now());
             game.setGameRoom(room);
             newGames.add(game);
         }
-        room.setGames(newGames);
+        room.setGames(newGames); // This will cascade-save the new games
 
         List<Team> teams = room.getTeams();
         Players.RoleType[] roles = {
@@ -133,7 +162,6 @@ public class RoomManagerService {
             Game currentGame = newGames.get(i);
 
             for (int j = 0; j < 4; j++) {
-
                 Players.RoleType initialRoleToGet = roles[(i + j) % 4];
                 Players.RoleType newRoleToPlay = roles[j];
 
@@ -156,16 +184,21 @@ public class RoomManagerService {
                 } else {
                     playerToAssign.setOrderArrivingNextWeek(GameConfig.INITIAL_PIPELINE_LEVEL);
                 }
-                playerToAssign.setIncomingShipment(GameConfig.INITIAL_PIPELINE_LEVEL);
-                playerToAssign.setOrderArrivingNextWeek(GameConfig.INITIAL_PIPELINE_LEVEL);
+                
+                // --- FIX 3: Correct pipeline initialization ---
+                playerToAssign.setIncomingShipment(GameConfig.INITIAL_PIPELINE_LEVEL); // Arrives week 1
+                playerToAssign.setShipmentArrivingWeekAfterNext(GameConfig.INITIAL_PIPELINE_LEVEL); // Arrives week 2
+                // --- End of Fix 3 ---
 
                 playerRepository.save(playerToAssign);
             }
         }
-        gameRoomRepository.save(room);
+        gameRoomRepository.save(room); // Save the room with all games and player updates
         log.info("Room {} started successfully.", room.getId());
 
-        broadcastRoomState(room.getId(), room);
+        // Re-fetch the fully saved room before broadcasting
+        GameRoom finalRoom = gameRoomRepository.findByIdWithAllData(room.getId()).get();
+        broadcastRoomState(finalRoom.getId(), finalRoom);
     }
 
     @SuppressWarnings("null")
