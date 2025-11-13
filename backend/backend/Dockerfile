@@ -9,7 +9,7 @@ RUN mvn clean package -DskipTests
 
 # Stage 2: Create the final, small image
 # Use the official 'eclipse-temurin' JRE (Java Runtime) image
-FROM eclipse-temurin:17-jre-slim
+FROM eclipse-temurin:17-jre
 WORKDIR /app
 # Copy the .jar file from the 'build' stage
 COPY --from=build /app/target/backend-0.0.1-SNAPSHOT.jar ./app.jar
