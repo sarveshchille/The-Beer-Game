@@ -12,8 +12,8 @@ WORKDIR /app
 
 COPY --from=build /app/target/backend-0.0.1-SNAPSHOT.jar app.jar
 
-# Render injects $PORT (usually 10000 internally), but expose 8080
+# This EXPOSE value does NOT matter to Render, but keep 8080 as standard
 EXPOSE 8080
 
-# IMPORTANT: Bind Spring Boot to Render’s port
+# 💥 IMPORTANT: Force Java to bind to Render's dynamic PORT
 ENTRYPOINT ["sh", "-c", "java -jar app.jar --server.port=$PORT"]
