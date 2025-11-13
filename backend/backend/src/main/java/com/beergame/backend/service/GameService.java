@@ -67,6 +67,7 @@ public class GameService {
     }
 
     public Game joinGame(String gameId, String username, Players.RoleType role) {
+        @SuppressWarnings("null")
         Game game = gameRepository.findById(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
         PlayerInfo playerInfo = playerInfoRepository.findByUserName(username)
@@ -107,6 +108,7 @@ public class GameService {
     }
 
     public void placeOrder(String gameId, String username, int orderAmount) {
+        @SuppressWarnings("null")
         Game game = gameRepository.findById(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found"));
 
@@ -146,6 +148,7 @@ public class GameService {
      */
     @Transactional // This logic MUST be transactional
     public void advanceTurn(String gameId) {
+        @SuppressWarnings("null")
         Game game = gameRepository.findById(gameId).orElseThrow(() -> new RuntimeException("Game not found"));
 
         // Ensure we have players
@@ -346,7 +349,9 @@ public class GameService {
         broadcastRoomState(roomId, room);
     }
 
+    @SuppressWarnings("null")
     private void broadcastGameState(String gameId) {
+        @SuppressWarnings("null")
         Game game = gameRepository.findById(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found"));
 
@@ -357,6 +362,7 @@ public class GameService {
         redisTemplate.convertAndSend(channel, newState);
     }
 
+    @SuppressWarnings("null")
     private void broadcastRoomState(String roomId, GameRoom room) {
         RoomStateDTO roomState = RoomStateDTO.fromGameRoom(room);
         String channel = "room-updates:" + roomId;
