@@ -109,11 +109,19 @@ public class GameService {
             Optional<Players> existing = playerRepository.findByGameAndPlayerInfoUserName(game, username);
             if (existing.isPresent()) {
 
-                // ALWAYS reload fresh state so websocket sends correct info
+                // reload fresh state
                 Game refreshed = gameRepository.findByIdWithPlayers(gameId)
                         .orElseThrow(() -> new RuntimeException("Game not found after join"));
 
-                broadcastGameState(gameId);
+                // delayed broadcast so this joiner also sees correct list
+                new Thread(() -> {
+                    try {
+                        Thread.sleep(300);
+                    } catch (Exception ignored) {
+                    }
+                    broadcastGameState(gameId);
+                }).start();
+
                 return refreshed;
             }
 
@@ -147,22 +155,22 @@ public class GameService {
             // SAVE PLAYER
             playerRepository.save(player);
 
-            // ---- RELOAD UPDATED GAME ----
+            // reload AFTER saving
             Game refreshed = gameRepository.findByIdWithPlayers(gameId)
                     .orElseThrow(() -> new RuntimeException("Game not found after join"));
 
             int count = refreshed.getPlayers().size();
 
-            // If full, flip to in-progress BEFORE broadcasting
+            // start game if full
             if (count == 4 && refreshed.getGameStatus() == Game.GameStatus.LOBBY) {
                 refreshed.setGameStatus(Game.GameStatus.IN_PROGRESS);
                 gameRepository.save(refreshed);
-                broadcastGameState(refreshed);
             }
 
+            // 🔥 ONLY ONE — CORRECT DELAYED BROADCAST
             new Thread(() -> {
                 try {
-                    Thread.sleep(600);
+                    Thread.sleep(300);
                 } catch (Exception ignored) {
                 }
                 broadcastGameState(gameId);
