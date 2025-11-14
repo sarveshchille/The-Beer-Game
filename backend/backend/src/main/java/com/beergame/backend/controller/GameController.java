@@ -24,12 +24,14 @@ public class GameController {
      */
     @PostMapping("/create")
     public ResponseEntity<GameStateDTO> createGame(
-            @AuthenticationPrincipal UserDetails userDetails) {
+            @AuthenticationPrincipal UserDetails userDetails,
+            @RequestBody JoinGameRequestDTO request) {
         if (userDetails == null) {
             return ResponseEntity.status(401).build(); // Should be handled by security config, but good practice
         }
 
         Game newGame = gameService.createGame(userDetails.getUsername());
+        gameService.joinGame(newGame.getId(), userDetails.getUsername(), request.role());
         return ResponseEntity.ok(GameStateDTO.fromGame(newGame));
     }
 

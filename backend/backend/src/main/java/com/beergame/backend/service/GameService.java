@@ -16,6 +16,7 @@ import com.beergame.backend.repository.PlayerRepository;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -26,6 +27,7 @@ import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -69,7 +71,7 @@ public class GameService {
 
         Game game = new Game();
         String newGameId = generateRandomId(10);
-        while(gameRepository.existsById(newGameId)) {
+        while (gameRepository.existsById(newGameId)) {
             newGameId = generateRandomId(10);
         }
         game.setId(newGameId);
@@ -90,6 +92,11 @@ public class GameService {
         PlayerInfo playerInfo = playerInfoRepository.findByUserName(username)
                 .orElseThrow(() -> new RuntimeException("User not found: " + username));
 
+        Optional<Players> existing = playerRepository.findByGameAndPlayerInfoUserName(game, username);
+        if (existing.isPresent()) {
+            log.info("Player {} already in game {} — skipping insert", username, gameId);
+            return game;
+        }
         boolean roleTaken = game.getPlayers() != null && game.getPlayers().stream()
                 .anyMatch(p -> p.getRole() == role);
         if (roleTaken) {
