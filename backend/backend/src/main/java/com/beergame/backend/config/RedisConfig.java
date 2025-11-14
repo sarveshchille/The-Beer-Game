@@ -6,7 +6,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.data.redis.listener.ChannelTopic;
+import org.springframework.data.redis.listener.PatternTopic;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.springframework.data.redis.listener.adapter.MessageListenerAdapter;
 import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
@@ -44,7 +44,9 @@ public class RedisConfig {
         container.setConnectionFactory(connectionFactory);
         // Add a listener to a "topic" (channel pattern)
         // This will listen to all channels that start with "game-updates:"
-        container.addMessageListener(messageListenerAdapter, new ChannelTopic("game-updates:*"));
+        container.addMessageListener(
+                messageListenerAdapter,
+                new PatternTopic("game-updates:*"));
         return container;
     }
 }
