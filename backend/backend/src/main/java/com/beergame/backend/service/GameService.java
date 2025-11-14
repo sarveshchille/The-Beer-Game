@@ -94,9 +94,9 @@ public class GameService {
     public Game joinGame(String gameIdRaw, String username, Players.RoleType role) {
         if (gameIdRaw == null)
             throw new RuntimeException("gameId is null");
+
         String gameId = gameIdRaw.trim();
 
-        // synchronize per-game to avoid duplicate inserts / race around roles
         synchronized (gameId.intern()) {
 
             Game game = gameRepository.findByIdWithPlayers(gameId)
@@ -105,24 +105,21 @@ public class GameService {
             PlayerInfo playerInfo = playerInfoRepository.findByUserName(username)
                     .orElseThrow(() -> new RuntimeException("User not found: " + username));
 
-            // if the user already has a Players record for the game, just return current
-            // game
             Optional<Players> existing = playerRepository.findByGameAndPlayerInfoUserName(game, username);
+
             if (existing.isPresent()) {
-                log.info("Player {} already in game {} — returning existing game", username, gameId);
-                // re-fetch to make sure we return a fresh game with players
-                return gameRepository.findByIdWithPlayers(gameId)
+                // Already in this lobby → return current
+                Game refreshed = gameRepository.findByIdWithPlayers(gameId)
                         .orElseThrow(() -> new RuntimeException("Game not found after join"));
+                broadcastGameState(gameId);
+                return refreshed;
             }
 
-            // ensure role is not already taken
-            boolean roleTaken = game.getPlayers() != null && game.getPlayers().stream()
+            boolean roleTaken = game.getPlayers().stream()
                     .anyMatch(p -> p.getRole() == role);
-            if (roleTaken) {
+            if (roleTaken)
                 throw new RuntimeException("Role " + role + " is already taken");
-            }
 
-            // create player entity
             Players player = new Players();
             player.setUserName(playerInfo.getUserName());
             player.setPlayerInfo(playerInfo);
@@ -132,37 +129,30 @@ public class GameService {
             player.setBackOrder(0);
             player.setTotalCost(0);
             player.setWeeklyCost(0);
+            player.setReadyForOrder(false);
 
             if (role == Players.RoleType.RETAILER) {
                 player.setOrderArrivingNextWeek(GameConfig.getCustomerDemand(1));
             } else {
                 player.setOrderArrivingNextWeek(GameConfig.INITIAL_PIPELINE_LEVEL);
             }
+
             player.setIncomingShipment(GameConfig.INITIAL_PIPELINE_LEVEL);
             player.setShipmentArrivingWeekAfterNext(GameConfig.INITIAL_PIPELINE_LEVEL);
 
             player.setGame(game);
 
-            // persist the player
+            // Save new player
             playerRepository.save(player);
-            log.info("Player {} joined game {} as {}", username, gameId, role);
 
-            // re-load the game with players to get up-to-date collection
-            Game updatedGame = gameRepository.findByIdWithPlayers(gameId)
+            // Reload with new player included
+            Game refreshed = gameRepository.findByIdWithPlayers(gameId)
                     .orElseThrow(() -> new RuntimeException("Game not found after join"));
 
-            // If exactly 4 players present switch game to IN_PROGRESS and broadcast
-            int playerCount = (updatedGame.getPlayers() == null) ? 0 : updatedGame.getPlayers().size();
-            if (playerCount >= 4 && updatedGame.getGameStatus() == Game.GameStatus.LOBBY) {
-                updatedGame.setGameStatus(Game.GameStatus.IN_PROGRESS);
-                gameRepository.save(updatedGame);
-                log.info("Game {} moved to IN_PROGRESS (players: {})", gameId, playerCount);
-            }
-
-            // broadcast the lobby/game update
+            // BROADCAST updated state
             broadcastGameState(gameId);
 
-            return updatedGame;
+            return refreshed;
         }
     }
 
