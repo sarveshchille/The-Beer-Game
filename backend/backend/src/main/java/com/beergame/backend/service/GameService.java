@@ -157,10 +157,16 @@ public class GameService {
             if (count == 4 && refreshed.getGameStatus() == Game.GameStatus.LOBBY) {
                 refreshed.setGameStatus(Game.GameStatus.IN_PROGRESS);
                 gameRepository.save(refreshed);
+                broadcastGameState(gameId);
             }
 
-            // BROADCAST CORRECT UPDATED STATE
-            broadcastGameState(gameId);
+            new Thread(() -> {
+                try {
+                    Thread.sleep(600);
+                } catch (Exception ignored) {
+                }
+                broadcastGameState(gameId);
+            }).start();
 
             return refreshed;
         }
@@ -416,5 +422,4 @@ public class GameService {
         return gameRepository.findByIdWithPlayers(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
     }
-
 }
