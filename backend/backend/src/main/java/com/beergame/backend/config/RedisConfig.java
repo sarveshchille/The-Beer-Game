@@ -1,7 +1,9 @@
 package com.beergame.backend.config;
 
 import com.beergame.backend.dto.GameStateDTO;
+import com.beergame.backend.dto.RoomStateDTO; // 👈 --- ADD THIS IMPORT
 import com.beergame.backend.service.GameStateSubscriber;
+import com.beergame.backend.service.RoomStateSubscriber; // 👈 --- You will create this
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
@@ -15,41 +17,50 @@ import org.springframework.data.redis.serializer.StringRedisSerializer;
 @Configuration
 public class RedisConfig {
 
-    // This bean is for PUBLISHING messages
+    // This bean is fine
     @Bean
     public RedisTemplate<String, Object> redisTemplate(RedisConnectionFactory connectionFactory) {
+        // ... (your existing code is correct) ...
         RedisTemplate<String, Object> template = new RedisTemplate<>();
         template.setConnectionFactory(connectionFactory);
         template.setKeySerializer(new StringRedisSerializer());
-        // Use JSON serializer for the game state object
         template.setValueSerializer(new Jackson2JsonRedisSerializer<>(Object.class));
-
         return template;
     }
 
-    // This adapter connects our subscriber logic (GameStateSubscriber) to Redis
-    @SuppressWarnings("null")
+    /**
+     * ✅ FIX: Listener adapter for GAME state
+     */
     @Bean
-    MessageListenerAdapter messageListenerAdapter(GameStateSubscriber subscriber) {
-        // "receiveMessage" is the method name in GameStateSubscriber that will be
-        // called
-        return new MessageListenerAdapter(subscriber, "receiveMessage");
+    MessageListenerAdapter gameListenerAdapter(GameStateSubscriber subscriber) {
+        MessageListenerAdapter adapter = new MessageListenerAdapter(subscriber, "receiveMessage");
+        // Tell it to deserialize GameStateDTO
+        adapter.setSerializer(new Jackson2JsonRedisSerializer<>(GameStateDTO.class));
+        return adapter;
     }
 
-    // This bean is for SUBSCRIBING to channels
-    @SuppressWarnings("null")
+    /**
+     * ✅ FIX: Listener adapter for ROOM state
+     */
+    @Bean
+    MessageListenerAdapter roomListenerAdapter(RoomStateSubscriber subscriber) {
+        MessageListenerAdapter adapter = new MessageListenerAdapter(subscriber, "receiveMessage");
+        // Tell it to deserialize RoomStateDTO
+        adapter.setSerializer(new Jackson2JsonRedisSerializer<>(RoomStateDTO.class));
+        return adapter;
+    }
+
     @Bean
     RedisMessageListenerContainer redisContainer(RedisConnectionFactory connectionFactory,
-            MessageListenerAdapter messageListenerAdapter) {
+            MessageListenerAdapter gameListenerAdapter, // 👈 --- Inject game adapter
+            MessageListenerAdapter roomListenerAdapter // 👈 --- Inject room adapter
+    ) {
         RedisMessageListenerContainer container = new RedisMessageListenerContainer();
         container.setConnectionFactory(connectionFactory);
-        // Add a listener to a "topic" (channel pattern)
-        // This will listen to all channels that start with "game-updates:"
-        container.addMessageListener(messageListenerAdapter,
-                new PatternTopic("game-updates:*"));
 
-        container.addMessageListener(messageListenerAdapter,
-                new PatternTopic("room-updates:*"));
+        // ✅ FIX: Subscribe each adapter to its OWN topic
+        container.addMessageListener(gameListenerAdapter, new PatternTopic("game-updates:*"));
+        container.addMessageListener(roomListenerAdapter, new PatternTopic("room-updates:*"));
 
         return container;
     }

@@ -17,11 +17,6 @@ public class GameController {
 
     private final GameService gameService;
 
-    /**
-     * Creates a new game lobby.
-     * 
-     * @AuthenticationPrincipal injects the user details from the JWT.
-     */
     @PostMapping("/create")
     public ResponseEntity<GameStateDTO> createGame(
             @AuthenticationPrincipal UserDetails userDetails,
@@ -34,12 +29,16 @@ public class GameController {
         // Step 1: create empty game
         Game newGame = gameService.createGame(userDetails.getUsername());
 
-        // Step 2: creator joins as the first player
-        gameService.joinGame(newGame.getId(), userDetails.getUsername(), request.role());
+        // Step 2: creator joins as the first player.
+        // THIS CALL SAVES THE PLAYER AND RETURNS THE UPDATED GAME.
+        Game updatedGame = gameService.joinGame(
+                newGame.getId(),
+                userDetails.getUsername(),
+                request.role());
 
-        // Step 3: fetch updated game WITH players included
-        Game updatedGame = gameService.getGameWithPlayers(newGame.getId());
-
+        // Step 3: Return the game state *from the joinGame call*.
+        // This state is guaranteed to have the creator in it.
+        // This fixes the "0/4 players" bug.
         return ResponseEntity.ok(GameStateDTO.fromGame(updatedGame));
     }
 

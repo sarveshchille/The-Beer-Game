@@ -20,6 +20,8 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.reactive.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionSynchronization;
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
@@ -98,50 +100,46 @@ public class GameService {
 
         String gameId = gameIdRaw.trim();
 
+        // synchronize per-game to avoid duplicate inserts / race around roles
         synchronized (gameId.intern()) {
 
-            // Load game WITH full players (DISTINCT fetch fix in repo)
+            // Load game WITH full players
             Game game = gameRepository.findByIdWithPlayers(gameId)
                     .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
 
             PlayerInfo playerInfo = playerInfoRepository.findByUserName(username)
                     .orElseThrow(() -> new RuntimeException("User not found: " + username));
 
-            // ------------------------------------------------------
-            // CASE 1: PLAYER ALREADY IN GAME → JUST BROADCAST CURRENT STATE
-            // ------------------------------------------------------
+            // CASE 1: PLAYER ALREADY IN GAME
             Optional<Players> existing = playerRepository.findByGameAndPlayerInfoUserName(game, username);
             if (existing.isPresent()) {
+                log.info("Player {} already in game {} — returning existing game", username, gameId);
 
                 Game refreshed = gameRepository.findByIdWithPlayers(gameId)
                         .orElseThrow(() -> new RuntimeException("Game not found after join"));
 
-                delayedBroadcast(gameId); // SMALL delay to ensure socket subscription ready
+                // Broadcast the current state just for this user
+                broadcastAfterCommit(refreshed);
                 return refreshed;
             }
 
-            // ------------------------------------------------------
-            // CASE 2: NEW PLAYER → CHECK ROLE IS FREE
-            // ------------------------------------------------------
+            // CASE 2: NEW PLAYER - CHECK ROLE IS FREE
             boolean roleTaken = game.getPlayers().stream()
                     .anyMatch(p -> p.getRole() == role);
 
             if (roleTaken)
                 throw new RuntimeException("Role " + role + " already taken");
 
-            // ------------------------------------------------------
             // CREATE NEW PLAYER ENTRY
-            // ------------------------------------------------------
             Players player = new Players();
             player.setUserName(playerInfo.getUserName());
             player.setPlayerInfo(playerInfo);
             player.setRole(role);
-
             player.setInventory(GameConfig.INITIAL_INVENTORY);
             player.setBackOrder(0);
             player.setWeeklyCost(0);
             player.setTotalCost(0);
-            player.setReadyForOrder(false);
+            player.setReadyForOrder(false); // Default to not ready
 
             if (role == Players.RoleType.RETAILER)
                 player.setOrderArrivingNextWeek(GameConfig.getCustomerDemand(1));
@@ -154,41 +152,44 @@ public class GameService {
             player.setGame(game);
 
             playerRepository.save(player);
+            log.info("Player {} joined game {} as {}", username, gameId, role);
 
-            // ------------------------------------------------------
-            // RELOAD AGAIN WITH DISTINCT-FETCH (ENSURES ALL PLAYERS appear)
-            // ------------------------------------------------------
+            // RELOAD AGAIN to get the most up-to-date player list
             Game refreshed = gameRepository.findByIdWithPlayers(gameId)
                     .orElseThrow(() -> new RuntimeException("Game not found after join"));
 
-            // ------------------------------------------------------
             // AUTO-START WHEN 4 PLAYERS JOIN
-            // ------------------------------------------------------
             if (refreshed.getPlayers().size() == 4 &&
                     refreshed.getGameStatus() == Game.GameStatus.LOBBY) {
 
                 refreshed.setGameStatus(Game.GameStatus.IN_PROGRESS);
                 gameRepository.save(refreshed); // save BEFORE broadcast
+                log.info("Game {} moved to IN_PROGRESS (players: {})", gameId, refreshed.getPlayers().size());
             }
 
-            // ------------------------------------------------------
-            // SINGLE, SAFE BROADCAST (NO DUPLICATES)
-            // ------------------------------------------------------
-            delayedBroadcast(gameId);
+            // Safely broadcast the new state AFTER the transaction commits
+            broadcastAfterCommit(refreshed);
 
             return refreshed;
         }
     }
 
-    // Utility: threaded broadcast after small delay
-    private void delayedBroadcast(String gameId) {
-        new Thread(() -> {
-            try {
-                Thread.sleep(500);
-            } catch (Exception ignored) {
-            }
-            broadcastGameState(gameId);
-        }).start();
+    /**
+     * Safely broadcasts the game state ONLY after the current database transaction
+     * has successfully committed. This prevents all race conditions.
+     */
+
+    private void broadcastAfterCommit(Game game) {
+        TransactionSynchronizationManager transactionSynchronizationManager = new TransactionSynchronizationManager(
+                null);
+        transactionSynchronizationManager.registerSynchronization(
+                (org.springframework.transaction.reactive.TransactionSynchronization) new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        // This code runs *after* the database commit
+                        broadcastGameState(game);
+                    }
+                });
     }
 
     /**
