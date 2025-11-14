@@ -87,6 +87,7 @@ public class GameService {
 
     public Game joinGame(String gameId, String username, Players.RoleType role) {
         @SuppressWarnings("null")
+        gameId.trim();
         Game game = gameRepository.findById(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
         PlayerInfo playerInfo = playerInfoRepository.findByUserName(username)
