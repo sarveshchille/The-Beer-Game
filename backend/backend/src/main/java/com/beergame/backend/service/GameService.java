@@ -88,8 +88,9 @@ public class GameService {
     public Game joinGame(String gameId, String username, Players.RoleType role) {
         @SuppressWarnings("null")
         gameId.trim();
-        Game game = gameRepository.findById(gameId)
-                .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
+        Game game = gameRepository.findByIdWithPlayers(gameId)
+        .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
+
         PlayerInfo playerInfo = playerInfoRepository.findByUserName(username)
                 .orElseThrow(() -> new RuntimeException("User not found: " + username));
 
@@ -134,8 +135,8 @@ public class GameService {
 
     public void placeOrder(String gameId, String username, int orderAmount) {
         @SuppressWarnings("null")
-        Game game = gameRepository.findById(gameId)
-                .orElseThrow(() -> new RuntimeException("Game not found"));
+        Game game = gameRepository.findByIdWithPlayers(gameId)
+                .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
 
         Players player = playerRepository.findByGameAndPlayerInfoUserName(game, username)
                 .orElseThrow(() -> new RuntimeException("Player not in this game"));
@@ -174,7 +175,8 @@ public class GameService {
     @Transactional // This logic MUST be transactional
     public void advanceTurn(String gameId) {
         @SuppressWarnings("null")
-        Game game = gameRepository.findById(gameId).orElseThrow(() -> new RuntimeException("Game not found"));
+        Game game = gameRepository.findByIdWithPlayers(gameId)
+                .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
 
         // Ensure we have players
         if (game.getPlayers() == null || game.getPlayers().isEmpty()) {
@@ -377,8 +379,8 @@ public class GameService {
     @SuppressWarnings("null")
     private void broadcastGameState(String gameId) {
         @SuppressWarnings("null")
-        Game game = gameRepository.findById(gameId)
-                .orElseThrow(() -> new RuntimeException("Game not found"));
+        Game game = gameRepository.findByIdWithPlayers(gameId)
+                .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
 
         GameStateDTO newState = GameStateDTO.fromGame(game);
         String channel = "game-updates:" + gameId;
