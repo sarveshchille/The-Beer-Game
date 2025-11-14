@@ -92,6 +92,7 @@ public class GameService {
      * when multiple requests try to join the same game at the same time.
      */
     public Game joinGame(String gameIdRaw, String username, Players.RoleType role) {
+
         if (gameIdRaw == null)
             throw new RuntimeException("gameId is null");
 
@@ -106,11 +107,12 @@ public class GameService {
                     .orElseThrow(() -> new RuntimeException("User not found: " + username));
 
             Optional<Players> existing = playerRepository.findByGameAndPlayerInfoUserName(game, username);
-
             if (existing.isPresent()) {
-                // Already in this lobby → return current
+
+                // ALWAYS reload fresh state so websocket sends correct info
                 Game refreshed = gameRepository.findByIdWithPlayers(gameId)
                         .orElseThrow(() -> new RuntimeException("Game not found after join"));
+
                 broadcastGameState(gameId);
                 return refreshed;
             }
@@ -118,8 +120,9 @@ public class GameService {
             boolean roleTaken = game.getPlayers().stream()
                     .anyMatch(p -> p.getRole() == role);
             if (roleTaken)
-                throw new RuntimeException("Role " + role + " is already taken");
+                throw new RuntimeException("Role " + role + " already taken");
 
+            // ---- CREATE NEW PLAYER ----
             Players player = new Players();
             player.setUserName(playerInfo.getUserName());
             player.setPlayerInfo(playerInfo);
@@ -127,29 +130,36 @@ public class GameService {
 
             player.setInventory(GameConfig.INITIAL_INVENTORY);
             player.setBackOrder(0);
-            player.setTotalCost(0);
             player.setWeeklyCost(0);
+            player.setTotalCost(0);
             player.setReadyForOrder(false);
 
-            if (role == Players.RoleType.RETAILER) {
+            if (role == Players.RoleType.RETAILER)
                 player.setOrderArrivingNextWeek(GameConfig.getCustomerDemand(1));
-            } else {
+            else
                 player.setOrderArrivingNextWeek(GameConfig.INITIAL_PIPELINE_LEVEL);
-            }
 
             player.setIncomingShipment(GameConfig.INITIAL_PIPELINE_LEVEL);
             player.setShipmentArrivingWeekAfterNext(GameConfig.INITIAL_PIPELINE_LEVEL);
 
             player.setGame(game);
 
-            // Save new player
+            // SAVE PLAYER
             playerRepository.save(player);
 
-            // Reload with new player included
+            // ---- RELOAD UPDATED GAME ----
             Game refreshed = gameRepository.findByIdWithPlayers(gameId)
                     .orElseThrow(() -> new RuntimeException("Game not found after join"));
 
-            // BROADCAST updated state
+            int count = refreshed.getPlayers().size();
+
+            // If full, flip to in-progress BEFORE broadcasting
+            if (count == 4 && refreshed.getGameStatus() == Game.GameStatus.LOBBY) {
+                refreshed.setGameStatus(Game.GameStatus.IN_PROGRESS);
+                gameRepository.save(refreshed);
+            }
+
+            // BROADCAST CORRECT UPDATED STATE
             broadcastGameState(gameId);
 
             return refreshed;
