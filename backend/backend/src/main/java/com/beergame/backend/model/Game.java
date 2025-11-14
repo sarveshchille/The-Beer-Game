@@ -7,6 +7,8 @@ import java.util.List;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
@@ -21,13 +23,14 @@ import lombok.Data;
 public class Game {
 
     @Id
-    @Column(length=10)
+    @Column(length = 10)
     private String id;
 
     @Column(name = "cuurentWeek")
     private int currentWeek;
 
     @Column(name = "gameStatus", nullable = false)
+    @Enumerated(EnumType.STRING)
     private GameStatus gameStatus;
 
     @Column(name = "createdAt", nullable = false)
