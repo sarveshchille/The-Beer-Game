@@ -157,7 +157,7 @@ public class GameService {
             if (count == 4 && refreshed.getGameStatus() == Game.GameStatus.LOBBY) {
                 refreshed.setGameStatus(Game.GameStatus.IN_PROGRESS);
                 gameRepository.save(refreshed);
-                broadcastGameState(gameId);
+                broadcastGameState(refreshed);
             }
 
             new Thread(() -> {
@@ -401,14 +401,21 @@ public class GameService {
         broadcastRoomState(roomId, room);
     }
 
-    private void broadcastGameState(String gameId) {
-        Game game = gameRepository.findByIdWithPlayers(gameId)
-                .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
-
+    public void broadcastGameState(Game game) {
         GameStateDTO newState = GameStateDTO.fromGame(game);
-        String channel = "game-updates:" + gameId;
-        log.info("Publishing new game state to Redis channel: {}", channel);
+        String channel = "game-updates:" + game.getId();
+        log.info("Publishing game state on Redis channel: {}", channel);
         redisTemplate.convertAndSend(channel, newState);
+    }
+
+    public void broadcastGameState(String gameId) {
+        try {
+            Game fresh = gameRepository.findByIdWithPlayers(gameId)
+                    .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
+            broadcastGameState(fresh);
+        } catch (Exception e) {
+            log.error("Failed to broadcast game state for id {}: {}", gameId, e.getMessage(), e);
+        }
     }
 
     private void broadcastRoomState(String roomId, GameRoom room) {
