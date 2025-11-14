@@ -13,10 +13,8 @@ import com.beergame.backend.repository.GameRoomRepository;
 import com.beergame.backend.repository.GameTurnRepository;
 import com.beergame.backend.repository.PlayerInfoRepository;
 import com.beergame.backend.repository.PlayerRepository;
-
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -65,6 +63,9 @@ public class GameService {
         return sb.toString();
     }
 
+    /**
+     * Create a single game (lobby).
+     */
     public Game createGame(String creatorUsername) {
         playerInfoRepository.findByUserName(creatorUsername)
                 .orElseThrow(() -> new RuntimeException("User not found"));
@@ -85,56 +86,90 @@ public class GameService {
         return savedGame;
     }
 
-    public Game joinGame(String gameId, String username, Players.RoleType role) {
-        @SuppressWarnings("null")
-        gameId.trim();
-        Game game = gameRepository.findByIdWithPlayers(gameId)
-        .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
+    /**
+     * Join an existing game as a role.
+     * Synchronized on gameId.intern() to avoid concurrent duplicate inserts
+     * when multiple requests try to join the same game at the same time.
+     */
+    public Game joinGame(String gameIdRaw, String username, Players.RoleType role) {
+        if (gameIdRaw == null)
+            throw new RuntimeException("gameId is null");
+        String gameId = gameIdRaw.trim();
 
-        PlayerInfo playerInfo = playerInfoRepository.findByUserName(username)
-                .orElseThrow(() -> new RuntimeException("User not found: " + username));
+        // synchronize per-game to avoid duplicate inserts / race around roles
+        synchronized (gameId.intern()) {
 
-        Optional<Players> existing = playerRepository.findByGameAndPlayerInfoUserName(game, username);
-        if (existing.isPresent()) {
-            log.info("Player {} already in game {} — skipping insert", username, gameId);
-            return game;
+            Game game = gameRepository.findByIdWithPlayers(gameId)
+                    .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
+
+            PlayerInfo playerInfo = playerInfoRepository.findByUserName(username)
+                    .orElseThrow(() -> new RuntimeException("User not found: " + username));
+
+            // if the user already has a Players record for the game, just return current
+            // game
+            Optional<Players> existing = playerRepository.findByGameAndPlayerInfoUserName(game, username);
+            if (existing.isPresent()) {
+                log.info("Player {} already in game {} — returning existing game", username, gameId);
+                // re-fetch to make sure we return a fresh game with players
+                return gameRepository.findByIdWithPlayers(gameId)
+                        .orElseThrow(() -> new RuntimeException("Game not found after join"));
+            }
+
+            // ensure role is not already taken
+            boolean roleTaken = game.getPlayers() != null && game.getPlayers().stream()
+                    .anyMatch(p -> p.getRole() == role);
+            if (roleTaken) {
+                throw new RuntimeException("Role " + role + " is already taken");
+            }
+
+            // create player entity
+            Players player = new Players();
+            player.setUserName(playerInfo.getUserName());
+            player.setPlayerInfo(playerInfo);
+            player.setRole(role);
+
+            player.setInventory(GameConfig.INITIAL_INVENTORY);
+            player.setBackOrder(0);
+            player.setTotalCost(0);
+            player.setWeeklyCost(0);
+
+            if (role == Players.RoleType.RETAILER) {
+                player.setOrderArrivingNextWeek(GameConfig.getCustomerDemand(1));
+            } else {
+                player.setOrderArrivingNextWeek(GameConfig.INITIAL_PIPELINE_LEVEL);
+            }
+            player.setIncomingShipment(GameConfig.INITIAL_PIPELINE_LEVEL);
+            player.setShipmentArrivingWeekAfterNext(GameConfig.INITIAL_PIPELINE_LEVEL);
+
+            player.setGame(game);
+
+            // persist the player
+            playerRepository.save(player);
+            log.info("Player {} joined game {} as {}", username, gameId, role);
+
+            // re-load the game with players to get up-to-date collection
+            Game updatedGame = gameRepository.findByIdWithPlayers(gameId)
+                    .orElseThrow(() -> new RuntimeException("Game not found after join"));
+
+            // If exactly 4 players present switch game to IN_PROGRESS and broadcast
+            int playerCount = (updatedGame.getPlayers() == null) ? 0 : updatedGame.getPlayers().size();
+            if (playerCount >= 4 && updatedGame.getGameStatus() == Game.GameStatus.LOBBY) {
+                updatedGame.setGameStatus(Game.GameStatus.IN_PROGRESS);
+                gameRepository.save(updatedGame);
+                log.info("Game {} moved to IN_PROGRESS (players: {})", gameId, playerCount);
+            }
+
+            // broadcast the lobby/game update
+            broadcastGameState(gameId);
+
+            return updatedGame;
         }
-        boolean roleTaken = game.getPlayers() != null && game.getPlayers().stream()
-                .anyMatch(p -> p.getRole() == role);
-        if (roleTaken) {
-            throw new RuntimeException("Role " + role + " is already taken");
-        }
-
-        Players player = new Players();
-        player.setUserName(playerInfo.getUserName());
-        player.setPlayerInfo(playerInfo);
-        player.setRole(role);
-
-        player.setInventory(GameConfig.INITIAL_INVENTORY);
-        player.setBackOrder(0);
-        player.setTotalCost(0);
-        player.setWeeklyCost(0);
-
-        if (player.getRole() == Players.RoleType.RETAILER) {
-            player.setOrderArrivingNextWeek(GameConfig.getCustomerDemand(1));
-        } else {
-            player.setOrderArrivingNextWeek(GameConfig.INITIAL_PIPELINE_LEVEL);
-        }
-        player.setIncomingShipment(GameConfig.INITIAL_PIPELINE_LEVEL);
-        player.setShipmentArrivingWeekAfterNext(GameConfig.INITIAL_PIPELINE_LEVEL);
-
-        player.setGame(game);
-
-        playerRepository.save(player);
-        log.info("Player {} joined game {} as {}", username, gameId, role);
-
-        game.getPlayers().add(player);
-        broadcastGameState(gameId);
-        return game;
     }
 
+    /**
+     * Player places order for a single game.
+     */
     public void placeOrder(String gameId, String username, int orderAmount) {
-        @SuppressWarnings("null")
         Game game = gameRepository.findByIdWithPlayers(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
 
@@ -146,39 +181,37 @@ public class GameService {
             return;
         }
 
-        player.setCurrentOrder(orderAmount < 0 ? 0 : orderAmount);
+        player.setCurrentOrder(Math.max(0, orderAmount));
         player.setReadyForOrder(true);
         playerRepository.save(player);
-        log.info("Player {} placed order of {} for week {}", username, orderAmount, game.getCurrentWeek());
+        log.info("Player {} placed order {} for week {}", username, orderAmount, game.getCurrentWeek());
+
+        // re-load game to ensure we have current player list / flags
+        Game reloaded = gameRepository.findByIdWithPlayers(gameId)
+                .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
 
         broadcastGameState(gameId);
 
-        List<Players> players = game.getPlayers();
+        List<Players> players = reloaded.getPlayers();
         if (players == null || players.size() < 4) {
             return;
         }
 
         boolean allReady = players.stream().allMatch(Players::isReadyForOrder);
-
         if (allReady) {
-            log.info("All players are ready. Advancing turn for game {}", gameId);
+            log.info("All players ready for game {}. Advancing turn.", gameId);
             advanceTurn(gameId);
         }
     }
 
-    // --- SHARED GAME ENGINE LOGIC ---
-
     /**
-     * This is the "Game Engine" logic, fully ported from your friend's code.
-     * It runs the simulation for one week for ONE game.
+     * Advance a single game's turn. Transactional to ensure DB consistency.
      */
-    @Transactional // This logic MUST be transactional
+    @Transactional
     public void advanceTurn(String gameId) {
-        @SuppressWarnings("null")
         Game game = gameRepository.findByIdWithPlayers(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
 
-        // Ensure we have players
         if (game.getPlayers() == null || game.getPlayers().isEmpty()) {
             log.warn("Tried to advance game {} with no players.", gameId);
             return;
@@ -194,13 +227,12 @@ public class GameService {
         Players distributor = playerMap.get(Players.RoleType.DISTRIBUTOR);
         Players manufacturer = playerMap.get(Players.RoleType.MANUFACTURER);
 
-        // Check if all players exist
         if (retailer == null || wholesaler == null || distributor == null || manufacturer == null) {
             log.error("Game {} is in an invalid state: missing one or more roles.", gameId);
             return;
         }
 
-        // ** Loop 1: Steps 1-4 (Receive & Fulfill) **
+        // Loop 1: receive shipments, fulfill orders
         for (Players p : game.getPlayers()) {
             int shipmentReceived = p.getIncomingShipment();
             p.setLastShipmentReceived(shipmentReceived);
@@ -208,18 +240,16 @@ public class GameService {
             p.setIncomingShipment(p.getShipmentArrivingWeekAfterNext());
             p.setShipmentArrivingWeekAfterNext(0);
 
-            int orderReceived = 0;
-            if (p.getRole() == Players.RoleType.RETAILER) {
-                orderReceived = GameConfig.getCustomerDemand(currentWeek);
-            } else {
-                orderReceived = p.getOrderArrivingNextWeek();
-                p.setOrderArrivingNextWeek(0);
-            }
+            int orderReceived = (p.getRole() == Players.RoleType.RETAILER)
+                    ? GameConfig.getCustomerDemand(currentWeek)
+                    : p.getOrderArrivingNextWeek();
+
             p.setLastOrderReceived(orderReceived);
+            if (p.getRole() != Players.RoleType.RETAILER)
+                p.setOrderArrivingNextWeek(0);
 
             int totalDemand = orderReceived + p.getBackOrder();
-            int shipmentSent = 0;
-
+            int shipmentSent;
             if (p.getInventory() >= totalDemand) {
                 shipmentSent = totalDemand;
                 p.setInventory(p.getInventory() - totalDemand);
@@ -234,12 +264,11 @@ public class GameService {
             double holdingCost = p.getInventory() * GameConfig.INVENTORY_HOLDING_COST;
             double backlogCost = p.getBackOrder() * GameConfig.BACKORDER_COST;
             double weeklyCost = holdingCost + backlogCost;
-
             p.setWeeklyCost(weeklyCost);
             p.setTotalCost(p.getTotalCost() + weeklyCost);
         }
 
-        // ** Loop 2: Steps 5 & 6 (Place & Advance Pipelines) **
+        // Loop 2: place & advance pipeline orders
         wholesaler.setOrderArrivingNextWeek(retailer.getCurrentOrder());
         distributor.setOrderArrivingNextWeek(wholesaler.getCurrentOrder());
         manufacturer.setOrderArrivingNextWeek(distributor.getCurrentOrder());
@@ -249,7 +278,7 @@ public class GameService {
         wholesaler.setShipmentArrivingWeekAfterNext(distributor.getOutgoingDelivery());
         retailer.setShipmentArrivingWeekAfterNext(wholesaler.getOutgoingDelivery());
 
-        // ** Loop 3: Log history & Reset Player **
+        // Loop 3: log history and reset players
         for (Players p : game.getPlayers()) {
             GameTurn turn = new GameTurn();
             turn.setWeekDay(currentWeek);
@@ -278,13 +307,10 @@ public class GameService {
         }
 
         gameRepository.save(game);
-
         log.info("Game {} advanced to week {}", gameId, game.getCurrentWeek());
 
-        // If this game is part of a room, broadcast the room state.
-        // Otherwise, broadcast the single game state.
+        // broadcast updated game state (or room state if part of a room)
         if (game.getGameRoom() != null) {
-            // Re-fetch full room data to send a complete update
             GameRoom room = gameRoomRepository.findByIdWithAllData(game.getGameRoom().getId()).get();
             broadcastRoomState(room.getId(), room);
         } else {
@@ -292,10 +318,8 @@ public class GameService {
         }
     }
 
-    // --- ROOM GAME METHODS ---
-
     /**
-     * Called by the WebSocket when a player in a room submits their order.
+     * Room mode: submit order for a room player
      */
     public void submitRoomOrder(String roomId, String username, int orderAmount) {
         GameRoom room = gameRoomRepository.findByIdWithAllData(roomId)
@@ -316,11 +340,11 @@ public class GameService {
             return;
         }
 
-        player.setCurrentOrder(orderAmount < 0 ? 0 : orderAmount);
+        player.setCurrentOrder(Math.max(0, orderAmount));
         player.setReadyForOrder(true);
         playerRepository.save(player);
 
-        // Broadcast the "player is ready" state
+        // broadcast intermediate room state
         broadcastRoomState(roomId, room);
 
         boolean allReady = room.getTeams().stream()
@@ -328,7 +352,7 @@ public class GameService {
                 .allMatch(Players::isReadyForOrder);
 
         if (allReady) {
-            log.info("All 16 players in room {} are ready. Advancing all 4 games in parallel.", roomId);
+            log.info("All players in room {} are ready. Advancing all games.", roomId);
 
             List<Game> games = room.getGames();
             CompletableFuture<Void> g1 = roomAdvancementService.advanceGame(games.get(0).getId());
@@ -336,17 +360,15 @@ public class GameService {
             CompletableFuture<Void> g3 = roomAdvancementService.advanceGame(games.get(2).getId());
             CompletableFuture<Void> g4 = roomAdvancementService.advanceGame(games.get(3).getId());
 
-            // Call postAdvanceRoomTurn using the injected 'self'
             CompletableFuture.allOf(g1, g2, g3, g4).thenRun(() -> {
-                log.info("All 4 games in room {} have finished. Running post-turn cleanup.", roomId);
-                self.postAdvanceRoomTurn(roomId); // Use self to ensure new transaction
+                log.info("All games in room {} advanced. Running post-turn cleanup.", roomId);
+                self.postAdvanceRoomTurn(roomId);
             });
         }
     }
 
     /**
-     * This runs *after* all 4 async games have advanced.
-     * It runs in a new transaction.
+     * Post-advance cleanup for rooms (runs in a new transaction).
      */
     @Transactional
     public void postAdvanceRoomTurn(String roomId) {
@@ -357,12 +379,11 @@ public class GameService {
                 .allMatch(g -> g.getGameStatus() == Game.GameStatus.FINISHED);
 
         if (allGamesFinished) {
-            log.info("All games in room {} are finished. Setting room status to FINISHED.", roomId);
             room.setStatus(GameRoom.RoomStatus.FINISHED);
             room.setFinishedAt(LocalDateTime.now());
+            log.info("Room {} finished.", roomId);
         }
 
-        // Reset all 16 players for the next turn
         room.getTeams().stream()
                 .flatMap(team -> team.getPlayers().stream())
                 .forEach(player -> {
@@ -371,29 +392,22 @@ public class GameService {
                 });
 
         gameRoomRepository.save(room);
-
-        // Broadcast the final new state to everyone in the room
         broadcastRoomState(roomId, room);
     }
 
-    @SuppressWarnings("null")
     private void broadcastGameState(String gameId) {
-        @SuppressWarnings("null")
         Game game = gameRepository.findByIdWithPlayers(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
 
         GameStateDTO newState = GameStateDTO.fromGame(game);
         String channel = "game-updates:" + gameId;
-
         log.info("Publishing new game state to Redis channel: {}", channel);
         redisTemplate.convertAndSend(channel, newState);
     }
 
-    @SuppressWarnings("null")
     private void broadcastRoomState(String roomId, GameRoom room) {
         RoomStateDTO roomState = RoomStateDTO.fromGameRoom(room);
         String channel = "room-updates:" + roomId;
-
         log.info("Broadcasting state for room {} to Redis channel: {}", roomId, channel);
         redisTemplate.convertAndSend(channel, roomState);
     }
