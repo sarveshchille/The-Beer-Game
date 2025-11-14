@@ -13,7 +13,12 @@ public interface GameRepository extends JpaRepository<Game, String> {
 
     List<Game> findByGameStatusAndCreatedAt(Game.GameStatus status, LocalDateTime localDateTime);
 
-    @Query("SELECT g FROM Game g LEFT JOIN FETCH g.players WHERE g.id = :id")
+    @Query("""
+            SELECT DISTINCT g
+            FROM Game g
+            LEFT JOIN FETCH g.players p
+            LEFT JOIN FETCH p.playerInfo
+            WHERE g.id = :id
+            """)
     Optional<Game> findByIdWithPlayers(String id);
-
 }

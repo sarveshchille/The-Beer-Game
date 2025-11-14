@@ -22,7 +22,8 @@ public class RedisConfig {
         template.setConnectionFactory(connectionFactory);
         template.setKeySerializer(new StringRedisSerializer());
         // Use JSON serializer for the game state object
-        template.setValueSerializer(new Jackson2JsonRedisSerializer<>(GameStateDTO.class));
+        template.setValueSerializer(new Jackson2JsonRedisSerializer<>(Object.class));
+
         return template;
     }
 
@@ -44,9 +45,12 @@ public class RedisConfig {
         container.setConnectionFactory(connectionFactory);
         // Add a listener to a "topic" (channel pattern)
         // This will listen to all channels that start with "game-updates:"
-        container.addMessageListener(
-                messageListenerAdapter,
+        container.addMessageListener(messageListenerAdapter,
                 new PatternTopic("game-updates:*"));
+
+        container.addMessageListener(messageListenerAdapter,
+                new PatternTopic("room-updates:*"));
+
         return container;
     }
 }

@@ -100,37 +100,38 @@ public class GameService {
 
         synchronized (gameId.intern()) {
 
+            // Load game WITH full players (DISTINCT fetch fix in repo)
             Game game = gameRepository.findByIdWithPlayers(gameId)
                     .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
 
             PlayerInfo playerInfo = playerInfoRepository.findByUserName(username)
                     .orElseThrow(() -> new RuntimeException("User not found: " + username));
 
+            // ------------------------------------------------------
+            // CASE 1: PLAYER ALREADY IN GAME → JUST BROADCAST CURRENT STATE
+            // ------------------------------------------------------
             Optional<Players> existing = playerRepository.findByGameAndPlayerInfoUserName(game, username);
             if (existing.isPresent()) {
 
-                // reload fresh state
                 Game refreshed = gameRepository.findByIdWithPlayers(gameId)
                         .orElseThrow(() -> new RuntimeException("Game not found after join"));
 
-                // delayed broadcast so this joiner also sees correct list
-                new Thread(() -> {
-                    try {
-                        Thread.sleep(300);
-                    } catch (Exception ignored) {
-                    }
-                    broadcastGameState(gameId);
-                }).start();
-
+                delayedBroadcast(gameId); // SMALL delay to ensure socket subscription ready
                 return refreshed;
             }
 
+            // ------------------------------------------------------
+            // CASE 2: NEW PLAYER → CHECK ROLE IS FREE
+            // ------------------------------------------------------
             boolean roleTaken = game.getPlayers().stream()
                     .anyMatch(p -> p.getRole() == role);
+
             if (roleTaken)
                 throw new RuntimeException("Role " + role + " already taken");
 
-            // ---- CREATE NEW PLAYER ----
+            // ------------------------------------------------------
+            // CREATE NEW PLAYER ENTRY
+            // ------------------------------------------------------
             Players player = new Players();
             player.setUserName(playerInfo.getUserName());
             player.setPlayerInfo(playerInfo);
@@ -152,32 +153,42 @@ public class GameService {
 
             player.setGame(game);
 
-            // SAVE PLAYER
             playerRepository.save(player);
 
-            // reload AFTER saving
+            // ------------------------------------------------------
+            // RELOAD AGAIN WITH DISTINCT-FETCH (ENSURES ALL PLAYERS appear)
+            // ------------------------------------------------------
             Game refreshed = gameRepository.findByIdWithPlayers(gameId)
                     .orElseThrow(() -> new RuntimeException("Game not found after join"));
 
-            int count = refreshed.getPlayers().size();
+            // ------------------------------------------------------
+            // AUTO-START WHEN 4 PLAYERS JOIN
+            // ------------------------------------------------------
+            if (refreshed.getPlayers().size() == 4 &&
+                    refreshed.getGameStatus() == Game.GameStatus.LOBBY) {
 
-            // start game if full
-            if (count == 4 && refreshed.getGameStatus() == Game.GameStatus.LOBBY) {
                 refreshed.setGameStatus(Game.GameStatus.IN_PROGRESS);
-                gameRepository.save(refreshed);
+                gameRepository.save(refreshed); // save BEFORE broadcast
             }
 
-            // 🔥 ONLY ONE — CORRECT DELAYED BROADCAST
-            new Thread(() -> {
-                try {
-                    Thread.sleep(300);
-                } catch (Exception ignored) {
-                }
-                broadcastGameState(gameId);
-            }).start();
+            // ------------------------------------------------------
+            // SINGLE, SAFE BROADCAST (NO DUPLICATES)
+            // ------------------------------------------------------
+            delayedBroadcast(gameId);
 
             return refreshed;
         }
+    }
+
+    // Utility: threaded broadcast after small delay
+    private void delayedBroadcast(String gameId) {
+        new Thread(() -> {
+            try {
+                Thread.sleep(500);
+            } catch (Exception ignored) {
+            }
+            broadcastGameState(gameId);
+        }).start();
     }
 
     /**

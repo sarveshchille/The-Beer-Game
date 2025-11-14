@@ -26,7 +26,7 @@ public class Game {
     @Column(length = 10)
     private String id;
 
-    @Column(name = "cuurentWeek")
+    @Column(name = "currentWeek")
     private int currentWeek;
 
     @Column(name = "gameStatus", nullable = false)
