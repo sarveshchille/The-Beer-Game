@@ -411,4 +411,10 @@ public class GameService {
         log.info("Broadcasting state for room {} to Redis channel: {}", roomId, channel);
         redisTemplate.convertAndSend(channel, roomState);
     }
+
+    public Game getGameWithPlayers(String gameId) {
+        return gameRepository.findByIdWithPlayers(gameId)
+                .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
+    }
+
 }

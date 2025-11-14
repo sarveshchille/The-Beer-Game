@@ -26,13 +26,21 @@ public class GameController {
     public ResponseEntity<GameStateDTO> createGame(
             @AuthenticationPrincipal UserDetails userDetails,
             @RequestBody JoinGameRequestDTO request) {
+
         if (userDetails == null) {
-            return ResponseEntity.status(401).build(); // Should be handled by security config, but good practice
+            return ResponseEntity.status(401).build();
         }
 
+        // Step 1: create empty game
         Game newGame = gameService.createGame(userDetails.getUsername());
+
+        // Step 2: creator joins as the first player
         gameService.joinGame(newGame.getId(), userDetails.getUsername(), request.role());
-        return ResponseEntity.ok(GameStateDTO.fromGame(newGame));
+
+        // Step 3: fetch updated game WITH players included
+        Game updatedGame = gameService.getGameWithPlayers(newGame.getId());
+
+        return ResponseEntity.ok(GameStateDTO.fromGame(updatedGame));
     }
 
     @PostMapping("/{gameId}/join")
