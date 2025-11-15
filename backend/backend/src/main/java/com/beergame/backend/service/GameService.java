@@ -124,7 +124,7 @@ public class GameService {
             Optional<Players> existing = playerRepository.findByGameAndPlayerInfoUserName(game, username);
             if (existing.isPresent()) {
                 log.info("Player {} already in game {} — returning existing game", username, gameId);
-                // Re-fetch to be safe
+
                 Game refreshed = gameRepository.findByIdWithPlayers(gameId)
                         .orElseThrow(() -> new RuntimeException("Game not found after join"));
 
