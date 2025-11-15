@@ -219,6 +219,9 @@ public class GameService {
     /**
      * Player places order for a single game.
      */
+    /**
+     * Player places order for a single game.
+     */
     public void placeOrder(String gameId, String username, int orderAmount) {
         Game game = gameRepository.findByIdWithPlayers(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
@@ -231,25 +234,29 @@ public class GameService {
             return;
         }
 
+        // ✅ FIX: Update the player object IN MEMORY
         player.setCurrentOrder(Math.max(0, orderAmount));
         player.setReadyForOrder(true);
-        playerRepository.save(player);
+        playerRepository.save(player); // Save the change
+
         log.info("Player {} placed order {} for week {}", username, orderAmount, game.getCurrentWeek());
 
-        // re-load game to ensure we have current player list / flags
-        Game reloaded = gameRepository.findByIdWithPlayers(gameId)
-                .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
+        // Broadcast the new state (showing this player as "ready")
+        // This will go out after the 'save' commits
+        broadcastAfterCommit(gameId);
 
-        broadcastGameState(gameId);
-
-        List<Players> players = reloaded.getPlayers();
+        // ✅ FIX: Check the IN-MEMORY list, which we know is up-to-date
+        List<Players> players = game.getPlayers();
         if (players == null || players.size() < 4) {
             return;
         }
 
+        // This check will now succeed when the 4th player submits
         boolean allReady = players.stream().allMatch(Players::isReadyForOrder);
         if (allReady) {
             log.info("All players ready for game {}. Advancing turn.", gameId);
+            // This call will run in a new transaction
+            // (thanks to the @Transactional on advanceTurn)
             advanceTurn(gameId);
         }
     }
@@ -361,10 +368,13 @@ public class GameService {
 
         // broadcast updated game state (or room state if part of a room)
         if (game.getGameRoom() != null) {
+            // This logic is complex, but your `broadcastRoomState`
+            // should also be wrapped in a broadcastAfterCommit
             GameRoom room = gameRoomRepository.findByIdWithAllData(game.getGameRoom().getId()).get();
-            broadcastRoomState(room.getId(), room);
+            broadcastRoomState(room.getId(), room); // This might have its own race condition
         } else {
-            broadcastGameState(gameId);
+            // This is the one that matters for your current bug
+            broadcastAfterCommit(gameId);
         }
     }
 
