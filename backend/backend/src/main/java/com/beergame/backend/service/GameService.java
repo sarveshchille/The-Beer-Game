@@ -124,11 +124,11 @@ public class GameService {
             Optional<Players> existing = playerRepository.findByGameAndPlayerInfoUserName(game, username);
             if (existing.isPresent()) {
                 log.info("Player {} already in game {} — returning existing game", username, gameId);
-
-                // Re-fetch is fine, but the key is the broadcast
+                // Re-fetch to be safe
                 Game refreshed = gameRepository.findByIdWithPlayers(gameId)
                         .orElseThrow(() -> new RuntimeException("Game not found after join"));
 
+                // Broadcast the current state AFTER commit
                 broadcastAfterCommit(gameId);
                 return refreshed;
             }
@@ -160,36 +160,29 @@ public class GameService {
             player.setShipmentArrivingWeekAfterNext(GameConfig.INITIAL_PIPELINE_LEVEL);
             player.setGame(game);
 
-            // 💡✅ --- THIS IS THE FIX --- ✅💡
-            // Manually add the new player to the game's in-memory list.
-            // This ensures the 'game' object we return is 100% up-to-date
-            // for the HTTP response, fixing the race condition.
-            game.getPlayers().add(player);
-
-            // Now, save the new player
-            playerRepository.save(player);
+            // ✅ FIX: Use saveAndFlush to force the DB insert *now*
+            playerRepository.saveAndFlush(player);
             log.info("Player {} joined game {} as {}", username, gameId, role);
 
-            // ❌ We DON'T need to reload anymore. The 'game' object is now the freshest
-            // copy.
-            // Game refreshed = gameRepository.findByIdWithPlayers(gameId)...
+            // ✅ FIX: Re-fetch the game *after* the flush.
+            // This 'refreshed' object is now 100% up-to-date.
+            Game refreshed = gameRepository.findByIdWithPlayers(gameId)
+                    .orElseThrow(() -> new RuntimeException("Game not found after join"));
 
             // AUTO-START WHEN 4 PLAYERS JOIN
-            // We can now safely check the in-memory list
-            if (game.getPlayers().size() == 4 &&
-                    game.getGameStatus() == Game.GameStatus.LOBBY) {
+            if (refreshed.getPlayers().size() == 4 &&
+                    refreshed.getGameStatus() == Game.GameStatus.LOBBY) {
 
-                game.setGameStatus(Game.GameStatus.IN_PROGRESS);
-                gameRepository.save(game); // Save the game status change
-                log.info("Game {} moved to IN_PROGRESS (players: {})", gameId, game.getPlayers().size());
+                refreshed.setGameStatus(Game.GameStatus.IN_PROGRESS);
+                gameRepository.save(refreshed); // save status change
+                log.info("Game {} moved to IN_PROGRESS (players: {})", gameId, refreshed.getPlayers().size());
             }
 
             // Safely broadcast the new state AFTER the transaction commits
-            // (This notifies all *other* players)
             broadcastAfterCommit(gameId);
 
-            // Return the 100% fresh in-memory 'game' object
-            return game;
+            // Return the 100% fresh data
+            return refreshed;
         }
     }
 
