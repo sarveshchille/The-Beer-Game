@@ -125,20 +125,17 @@ public class GameService {
             if (existing.isPresent()) {
                 log.info("Player {} already in game {} — returning existing game", username, gameId);
 
-                Game refreshed = gameRepository.findByIdWithPlayers(gameId)
-                        .orElseThrow(() -> new RuntimeException("Game not found after join"));
-
-                // Broadcast the current state AFTER commit
+                // Just broadcast the current state to ensure this user gets it
                 broadcastAfterCommit(gameId);
-                return refreshed;
+                return game; // Return the game we already loaded
             }
 
             // CASE 2: NEW PLAYER - CHECK ROLE IS FREE
             boolean roleTaken = game.getPlayers().stream()
                     .anyMatch(p -> p.getRole() == role);
-
-            if (roleTaken)
+            if (roleTaken) {
                 throw new RuntimeException("Role " + role + " already taken");
+            }
 
             // CREATE NEW PLAYER ENTRY
             Players player = new Players();
@@ -160,29 +157,30 @@ public class GameService {
             player.setShipmentArrivingWeekAfterNext(GameConfig.INITIAL_PIPELINE_LEVEL);
             player.setGame(game);
 
-            // ✅ FIX: Use saveAndFlush to force the DB insert *now*
-            playerRepository.saveAndFlush(player);
+            // ✅ --- THIS IS THE FIX --- ✅
+            // Manually add the new player to the game's in-memory list.
+            // This ensures the 'game' object we return is 100% up-to-date
+            // for the HTTP response, fixing the race condition.
+            game.getPlayers().add(player);
+
+            // Now, save the new player. Spring will handle cascading.
+            playerRepository.save(player);
             log.info("Player {} joined game {} as {}", username, gameId, role);
 
-            // ✅ FIX: Re-fetch the game *after* the flush.
-            // This 'refreshed' object is now 100% up-to-date.
-            Game refreshed = gameRepository.findByIdWithPlayers(gameId)
-                    .orElseThrow(() -> new RuntimeException("Game not found after join"));
-
             // AUTO-START WHEN 4 PLAYERS JOIN
-            if (refreshed.getPlayers().size() == 4 &&
-                    refreshed.getGameStatus() == Game.GameStatus.LOBBY) {
-
-                refreshed.setGameStatus(Game.GameStatus.IN_PROGRESS);
-                gameRepository.save(refreshed); // save status change
-                log.info("Game {} moved to IN_PROGRESS (players: {})", gameId, refreshed.getPlayers().size());
+            // We can now safely check the in-memory list
+            if (game.getPlayers().size() == 4 && game.getGameStatus() == Game.GameStatus.LOBBY) {
+                game.setGameStatus(Game.GameStatus.IN_PROGRESS);
+                gameRepository.save(game); // Save the game status change
+                log.info("Game {} moved to IN_PROGRESS (players: {})", gameId, game.getPlayers().size());
             }
 
-            // Safely broadcast the new state AFTER the transaction commits
+            // Broadcast the new state AFTER the transaction commits
+            // (This notifies all *other* players)
             broadcastAfterCommit(gameId);
 
-            // Return the 100% fresh data
-            return refreshed;
+            // ✅ Return the IN-MEMORY 'game' object, which now has the new player
+            return game;
         }
     }
 
