@@ -2,9 +2,13 @@ package com.beergame.backend.dto;
 
 import com.beergame.backend.config.GameConfig;
 import com.beergame.backend.model.Game;
+
+import lombok.extern.slf4j.Slf4j;
+
 import java.util.List;
 import java.util.stream.Collectors;
 
+@Slf4j
 public record GameStateDTO(
                 String gameId,
                 int currentWeek,
@@ -18,6 +22,14 @@ public record GameStateDTO(
                 List<PlayerStateDTO> playerStates = game.getPlayers().stream()
                                 .map(PlayerStateDTO::fromPlayer)
                                 .collect(Collectors.toList());
+
+                if (!GameConfig.getFestiveWeeks().isEmpty()) {
+
+                        log.info("SENDING COMPLETE LIST OF FESTIVES");
+
+                } else {
+                        log.error("SENDING EMPTY LIST OF FESTIVES");
+                }
 
                 return new GameStateDTO(
                                 game.getId(),
