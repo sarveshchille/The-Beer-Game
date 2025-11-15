@@ -20,8 +20,9 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.reactive.TransactionSynchronizationManager;
-import org.springframework.transaction.support.TransactionSynchronization;
+// ✅ ADD THESE
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionSynchronizationAdapter;
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
@@ -93,6 +94,11 @@ public class GameService {
      * Synchronized on gameId.intern() to avoid concurrent duplicate inserts
      * when multiple requests try to join the same game at the same time.
      */
+    /**
+     * Join an existing game as a role.
+     * Synchronized on gameId.intern() to avoid concurrent duplicate inserts
+     * when multiple requests try to join the same game at the same time.
+     */
     public Game joinGame(String gameIdRaw, String username, Players.RoleType role) {
 
         if (gameIdRaw == null)
@@ -103,7 +109,6 @@ public class GameService {
         // synchronize per-game to avoid duplicate inserts / race around roles
         synchronized (gameId.intern()) {
 
-            // Load game WITH full players
             Game game = gameRepository.findByIdWithPlayers(gameId)
                     .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
 
@@ -118,8 +123,8 @@ public class GameService {
                 Game refreshed = gameRepository.findByIdWithPlayers(gameId)
                         .orElseThrow(() -> new RuntimeException("Game not found after join"));
 
-                // Broadcast the current state just for this user
-                broadcastAfterCommit(refreshed);
+                // ✅ CHANGED: Call the safe broadcast helper
+                broadcastAfterCommit(gameId);
                 return refreshed;
             }
 
@@ -139,7 +144,7 @@ public class GameService {
             player.setBackOrder(0);
             player.setWeeklyCost(0);
             player.setTotalCost(0);
-            player.setReadyForOrder(false); // Default to not ready
+            player.setReadyForOrder(false);
 
             if (role == Players.RoleType.RETAILER)
                 player.setOrderArrivingNextWeek(GameConfig.getCustomerDemand(1));
@@ -167,9 +172,10 @@ public class GameService {
                 log.info("Game {} moved to IN_PROGRESS (players: {})", gameId, refreshed.getPlayers().size());
             }
 
-            // Safely broadcast the new state AFTER the transaction commits
-            broadcastAfterCommit(refreshed);
+            // ✅ CHANGED: Call the safe broadcast helper
+            broadcastAfterCommit(gameId);
 
+            // Return the 100% fresh data
             return refreshed;
         }
     }
@@ -179,17 +185,31 @@ public class GameService {
      * has successfully committed. This prevents all race conditions.
      */
 
-    private void broadcastAfterCommit(Game game) {
-        TransactionSynchronizationManager transactionSynchronizationManager = new TransactionSynchronizationManager(
-                null);
-        transactionSynchronizationManager.registerSynchronization(
-                (org.springframework.transaction.reactive.TransactionSynchronization) new TransactionSynchronization() {
-                    @Override
-                    public void afterCommit() {
-                        // This code runs *after* the database commit
-                        broadcastGameState(game);
-                    }
-                });
+    /**
+     * Safely broadcasts the game state ONLY after the current database transaction
+     * has successfully committed. This prevents all race conditions.
+     */
+    private void broadcastAfterCommit(String gameId) {
+
+        // Use TransactionSynchronizationAdapter to only override the method we need
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronizationAdapter() {
+
+            @Override
+            public void afterCommit() {
+                // This code runs *after* the database commit
+                log.info("Transaction committed for game {}. Broadcasting state.", gameId);
+
+                // Re-fetch the game state AFTER commit to ensure data is fresh
+                try {
+                    Game freshGame = gameRepository.findByIdWithPlayers(gameId)
+                            .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
+
+                    broadcastGameState(freshGame); // This is your existing method
+                } catch (Exception e) {
+                    log.error("Failed to broadcast game state after commit for id {}: {}", gameId, e.getMessage(), e);
+                }
+            }
+        });
     }
 
     /**
