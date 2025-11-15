@@ -82,6 +82,7 @@ public class GameService {
         game.setGameStatus(Game.GameStatus.LOBBY);
         game.setCurrentWeek(1);
         game.setCreatedAt(LocalDateTime.now());
+        game.setFestiveWeek(GameConfig.isFestiveWeek(1));
 
         log.info("Creating new game. ID will be generated on save.");
         Game savedGame = gameRepository.save(game);

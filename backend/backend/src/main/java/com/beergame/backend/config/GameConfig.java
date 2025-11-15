@@ -1,6 +1,7 @@
 package com.beergame.backend.config;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Random;
 import java.util.Set;
 
@@ -82,5 +83,19 @@ public class GameConfig {
 
         // Return the demand from the base schedule
         return BASE_DEMAND_SCHEDULE[week - 1]; // -1 for 0-based array index
+    }
+
+    public static boolean isFestiveWeek(int week) {
+        return FESTIVE_WEEKS.contains(week);
+    }
+
+    /**
+     * Public helper to get the complete list of festive weeks.
+     * 
+     * @return A List of the random festive week numbers.
+     */
+    public static List<Integer> getFestiveWeeks() {
+        // Convert the Set to a List for the DTO
+        return List.copyOf(FESTIVE_WEEKS);
     }
 }
