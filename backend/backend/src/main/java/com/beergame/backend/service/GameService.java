@@ -362,6 +362,12 @@ public class GameService {
         if (game.getCurrentWeek() > GameConfig.GAME_WEEKS) {
             game.setGameStatus(Game.GameStatus.FINISHED);
             game.setFinishedAt(LocalDateTime.now());
+            game.setFestiveWeek(false); // Game is over
+        } else {
+            // Use your new helper to set the flag for the *new* current week
+            boolean isNextWeekFestive = GameConfig.isFestiveWeek(game.getCurrentWeek());
+            game.setFestiveWeek(isNextWeekFestive);
+            log.info("Game {} set festive status for week {} to: {}", gameId, game.getCurrentWeek(), isNextWeekFestive);
         }
 
         gameRepository.save(game);
