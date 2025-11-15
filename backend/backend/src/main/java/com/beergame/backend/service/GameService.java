@@ -99,6 +99,11 @@ public class GameService {
      * Synchronized on gameId.intern() to avoid concurrent duplicate inserts
      * when multiple requests try to join the same game at the same time.
      */
+    /**
+     * Join an existing game as a role.
+     * Synchronized on gameId.intern() to avoid concurrent duplicate inserts
+     * when multiple requests try to join the same game at the same time.
+     */
     public Game joinGame(String gameIdRaw, String username, Players.RoleType role) {
 
         if (gameIdRaw == null)
@@ -110,20 +115,20 @@ public class GameService {
         synchronized (gameId.intern()) {
 
             Game game = gameRepository.findByIdWithPlayers(gameId)
-                    .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
+                    .orElseThrow(() -> new RuntimeException("Game not found: ".concat(gameId)));
 
             PlayerInfo playerInfo = playerInfoRepository.findByUserName(username)
-                    .orElseThrow(() -> new RuntimeException("User not found: " + username));
+                    .orElseThrow(() -> new RuntimeException("User not found: ".concat(username)));
 
             // CASE 1: PLAYER ALREADY IN GAME
             Optional<Players> existing = playerRepository.findByGameAndPlayerInfoUserName(game, username);
             if (existing.isPresent()) {
                 log.info("Player {} already in game {} — returning existing game", username, gameId);
 
+                // Re-fetch is fine, but the key is the broadcast
                 Game refreshed = gameRepository.findByIdWithPlayers(gameId)
                         .orElseThrow(() -> new RuntimeException("Game not found after join"));
 
-                // ✅ CHANGED: Call the safe broadcast helper
                 broadcastAfterCommit(gameId);
                 return refreshed;
             }
@@ -153,30 +158,38 @@ public class GameService {
 
             player.setIncomingShipment(GameConfig.INITIAL_PIPELINE_LEVEL);
             player.setShipmentArrivingWeekAfterNext(GameConfig.INITIAL_PIPELINE_LEVEL);
-
             player.setGame(game);
 
+            // 💡✅ --- THIS IS THE FIX --- ✅💡
+            // Manually add the new player to the game's in-memory list.
+            // This ensures the 'game' object we return is 100% up-to-date
+            // for the HTTP response, fixing the race condition.
+            game.getPlayers().add(player);
+
+            // Now, save the new player
             playerRepository.save(player);
             log.info("Player {} joined game {} as {}", username, gameId, role);
 
-            // RELOAD AGAIN to get the most up-to-date player list
-            Game refreshed = gameRepository.findByIdWithPlayers(gameId)
-                    .orElseThrow(() -> new RuntimeException("Game not found after join"));
+            // ❌ We DON'T need to reload anymore. The 'game' object is now the freshest
+            // copy.
+            // Game refreshed = gameRepository.findByIdWithPlayers(gameId)...
 
             // AUTO-START WHEN 4 PLAYERS JOIN
-            if (refreshed.getPlayers().size() == 4 &&
-                    refreshed.getGameStatus() == Game.GameStatus.LOBBY) {
+            // We can now safely check the in-memory list
+            if (game.getPlayers().size() == 4 &&
+                    game.getGameStatus() == Game.GameStatus.LOBBY) {
 
-                refreshed.setGameStatus(Game.GameStatus.IN_PROGRESS);
-                gameRepository.save(refreshed); // save BEFORE broadcast
-                log.info("Game {} moved to IN_PROGRESS (players: {})", gameId, refreshed.getPlayers().size());
+                game.setGameStatus(Game.GameStatus.IN_PROGRESS);
+                gameRepository.save(game); // Save the game status change
+                log.info("Game {} moved to IN_PROGRESS (players: {})", gameId, game.getPlayers().size());
             }
 
-            // ✅ CHANGED: Call the safe broadcast helper
+            // Safely broadcast the new state AFTER the transaction commits
+            // (This notifies all *other* players)
             broadcastAfterCommit(gameId);
 
-            // Return the 100% fresh data
-            return refreshed;
+            // Return the 100% fresh in-memory 'game' object
+            return game;
         }
     }
 
