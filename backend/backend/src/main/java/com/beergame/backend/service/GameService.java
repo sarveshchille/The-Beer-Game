@@ -493,6 +493,7 @@ public class GameService {
                 .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
     }
 
+    @Transactional(readOnly = true)
     public Map<String, List<GameTurn>> getGameHistory(String gameId) {
         Game game = getGameWithPlayers(gameId);
 
