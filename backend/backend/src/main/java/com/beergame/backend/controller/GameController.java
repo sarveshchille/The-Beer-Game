@@ -5,6 +5,7 @@ import com.beergame.backend.dto.JoinGameRequestDTO;
 import com.beergame.backend.model.Game;
 import com.beergame.backend.service.GameService;
 import lombok.RequiredArgsConstructor;
+
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -52,5 +53,15 @@ public class GameController {
 
         Game game = gameService.joinGame(gameId, userDetails.getUsername(), request.role());
         return ResponseEntity.ok(GameStateDTO.fromGame(game));
+    }
+
+    @GetMapping("/{gameId}/history")
+    public ResponseEntity<?> getGameHistory(@PathVariable String gameId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+
+        if (userDetails == null) {
+            return ResponseEntity.status(401).build();
+        }
+        return ResponseEntity.ok(gameService.getGameHistory(gameId));
     }
 }

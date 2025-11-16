@@ -31,6 +31,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
+import java.util.stream.Collector;
 import java.util.stream.Collectors;
 
 @Service
@@ -489,5 +490,16 @@ public class GameService {
     public Game getGameWithPlayers(String gameId) {
         return gameRepository.findByIdWithPlayers(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
+    }
+
+    public Map<String, List<GameTurn>> getGameHistory(String gameId) {
+        Game game = getGameWithPlayers(gameId);
+
+        return game.getPlayers().stream()
+                .collect(Collectors.groupingBy(
+                        player -> player.getRole().toString(),
+                        Collectors.flatMapping(
+                                (Players p) -> p.getTurnHistory().stream(),
+                                Collectors.toList())));
     }
 }
