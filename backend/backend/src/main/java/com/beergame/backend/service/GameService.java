@@ -488,26 +488,40 @@ public class GameService {
         redisTemplate.convertAndSend(channel, roomState);
     }
 
-    public Game getGameWithPlayers(String gameId) {
-        return gameRepository.findByIdWithPlayers(gameId)
-                .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
-    }
-
     @Transactional(readOnly = true)
     public Map<String, List<GameTurn>> getGameHistory(String gameId) {
-        Game game = getGameWithPlayers(gameId);
+        // We use the basic findById here. Since we are inside a @Transactional method,
+        // the lazy-loaded collections will be initialized when accessed.
+        Game game = gameRepository.findById(gameId)
+                .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
 
+        if (game.getPlayers() == null || game.getPlayers().isEmpty()) {
+            log.warn("Game {} has no players linked. Returning empty history.", gameId);
+            return Collections.emptyMap();
+        }
+
+        // Map players to their history lists.
         return game.getPlayers().stream()
                 .collect(Collectors.toMap(
                         player -> player.getRole().toString(),
                         player -> {
+                            // Accessing getTurnHistory() forces JPA to load the history
+                            // from the database, because we are inside the transaction.
                             List<GameTurn> history = player.getTurnHistory();
 
                             if (history == null) {
+
+                                log.error("Empty list sent");
+                                // Should not happen if data is saved, but safety first
                                 return Collections.emptyList();
                             }
+
+                            // Frontend expects all turns in chronological order, but
+                            // the frontend then reverses it for display, so we return the list as is.
                             return history;
                         },
+                        // Merge function for safety (required by Collectors.toMap, though keys should
+                        // be unique)
                         (existing, replacement) -> existing));
     }
 }
