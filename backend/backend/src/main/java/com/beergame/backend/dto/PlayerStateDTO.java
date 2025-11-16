@@ -10,6 +10,7 @@ public record PlayerStateDTO(
         int backlog,
         int currentOrder,
         int incomingShipment,
+        double weeklyCost,
         double totalCost,
         boolean isReadyForNextTurn,
         int lastOrderReceived // 👈 --- 1. ADD THIS LINE
@@ -23,6 +24,7 @@ public record PlayerStateDTO(
                 player.getBackOrder(),
                 player.getCurrentOrder(),
                 player.getIncomingShipment(),
+                player.getWeeklyCost(),
                 player.getTotalCost(),
                 player.isReadyForOrder(),
                 player.getLastOrderReceived() // 👈 --- 2. ADD THIS LINE
