@@ -26,6 +26,7 @@ import org.springframework.transaction.support.TransactionSynchronizationAdapter
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -496,10 +497,16 @@ public class GameService {
         Game game = getGameWithPlayers(gameId);
 
         return game.getPlayers().stream()
-                .collect(Collectors.groupingBy(
+                .collect(Collectors.toMap(
                         player -> player.getRole().toString(),
-                        Collectors.flatMapping(
-                                (Players p) -> p.getTurnHistory().stream(),
-                                Collectors.toList())));
+                        player -> {
+                            List<GameTurn> history = player.getTurnHistory();
+
+                            if (history == null) {
+                                return Collections.emptyList();
+                            }
+                            return history;
+                        },
+                        (existing, replacement) -> existing));
     }
 }
