@@ -2,6 +2,7 @@ package com.beergame.backend.service;
 
 import com.beergame.backend.config.GameConfig;
 import com.beergame.backend.dto.GameStateDTO;
+import com.beergame.backend.dto.GameTurnHistoryDTO;
 import com.beergame.backend.dto.RoomStateDTO;
 import com.beergame.backend.model.Game;
 import com.beergame.backend.model.GameRoom;
@@ -27,6 +28,7 @@ import org.springframework.transaction.support.TransactionSynchronizationAdapter
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -489,19 +491,32 @@ public class GameService {
     }
 
     @Transactional(readOnly = true)
-    public Map<String, List<GameTurn>> getGameHistory(String gameId) {
+    public Map<String, List<GameTurnHistoryDTO>> getGameHistory(String gameId) {
 
         Game game = gameRepository.findByIdWithPlayersAndTurnHistory(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
 
         if (game.getPlayers() == null || game.getPlayers().isEmpty()) {
+            log.warn("Game {} has no players linked. Returning empty history.", gameId);
             return Collections.emptyMap();
         }
 
         return game.getPlayers().stream()
                 .collect(Collectors.toMap(
-                        p -> p.getRole().toString(),
-                        p -> p.getTurnHistory() != null ? p.getTurnHistory() : Collections.emptyList()));
+                        player -> player.getRole().toString(), // key = "RETAILER", ...
+                        player -> {
+                            List<GameTurn> history = player.getTurnHistory();
+                            if (history == null) {
+                                log.error("Player {} in game {} has null turn history.", player.getUserName(), gameId);
+                                return Collections.<GameTurnHistoryDTO>emptyList();
+                            }
+
+                            return history.stream()
+                                    .sorted(Comparator.comparingInt(GameTurn::getWeekDay))
+                                    .map(GameTurnHistoryDTO::fromEntity)
+                                    .toList();
+                        },
+                        (existing, replacement) -> existing));
     }
 
 }
