@@ -1,5 +1,6 @@
 package com.beergame.backend.model;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import jakarta.persistence.CascadeType;
@@ -80,7 +81,7 @@ public class Players {
     private Game game;
 
     @OneToMany(mappedBy = "player", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
-    private List<GameTurn> turnHistory;
+    private List<GameTurn> turnHistory = new ArrayList<>();
 
     @Enumerated(EnumType.STRING)
     @Column(name = "role")

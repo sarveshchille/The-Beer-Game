@@ -492,7 +492,7 @@ public class GameService {
     public Map<String, List<GameTurn>> getGameHistory(String gameId) {
         // We use the basic findById here. Since we are inside a @Transactional method,
         // the lazy-loaded collections will be initialized when accessed.
-        Game game = gameRepository.findById(gameId)
+        Game game = gameRepository.findByIdWithPlayersAndTurnHistory(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
 
         if (game.getPlayers() == null || game.getPlayers().isEmpty()) {
