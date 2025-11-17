@@ -491,34 +491,17 @@ public class GameService {
     @Transactional(readOnly = true)
     public Map<String, List<GameTurn>> getGameHistory(String gameId) {
 
-        // 🛑 REPLACE THIS LINE:
-        // Game game = gameRepository.findByIdWithPlayersAndTurnHistory(gameId)
-        // .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
-
-        // ✅ WITH THIS LINE:
-        Game game = gameRepository.findByIdWithPlayers(gameId)
+        Game game = gameRepository.findByIdWithPlayersAndTurnHistory(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
 
         if (game.getPlayers() == null || game.getPlayers().isEmpty()) {
-            log.warn("Game {} has no players linked. Returning empty history.", gameId);
             return Collections.emptyMap();
         }
 
-        // The rest of your method will now work perfectly
         return game.getPlayers().stream()
                 .collect(Collectors.toMap(
-                        player -> player.getRole().toString(),
-                        player -> {
-                            // This line will now correctly lazy-load the history
-                            List<GameTurn> history = player.getTurnHistory();
-
-                            if (history == null) {
-                                log.error("Player {} in game {} has null turn history.", player.getUserName(), gameId);
-                                return Collections.emptyList();
-                            }
-
-                            return history;
-                        },
-                        (existing, replacement) -> existing));
+                        p -> p.getRole().toString(),
+                        p -> p.getTurnHistory() != null ? p.getTurnHistory() : Collections.emptyList()));
     }
+
 }
