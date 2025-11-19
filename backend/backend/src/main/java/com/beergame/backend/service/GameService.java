@@ -27,8 +27,10 @@ import org.springframework.transaction.support.TransactionSynchronizationAdapter
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -493,30 +495,40 @@ public class GameService {
     @Transactional(readOnly = true)
     public Map<String, List<GameTurnHistoryDTO>> getGameHistory(String gameId) {
 
-        Game game = gameRepository.findByIdWithPlayersAndTurnHistory(gameId)
-                .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
-
-        if (game.getPlayers() == null || game.getPlayers().isEmpty()) {
-            log.warn("Game {} has no players linked. Returning empty history.", gameId);
-            return Collections.emptyMap();
+        // 1. Fast check if game exists
+        if (!gameRepository.existsById(gameId)) {
+            throw new RuntimeException("Game not found: " + gameId);
         }
 
-        return game.getPlayers().stream()
-                .collect(Collectors.toMap(
-                        player -> player.getRole().toString(), // key = "RETAILER", ...
-                        player -> {
-                            List<GameTurn> history = player.getTurnHistory();
-                            if (history == null) {
-                                log.error("Player {} in game {} has null turn history.", player.getUserName(), gameId);
-                                return Collections.<GameTurnHistoryDTO>emptyList();
-                            }
+        // 2. ✅ THE FIX: Fetch ALL history for this game directly
+        // This avoids the "MultipleBagFetchException" completely.
+        List<GameTurn> allTurns = gameTurnRepository.findByPlayer_Game_Id(gameId);
 
-                            return history.stream()
-                                    .sorted(Comparator.comparingInt(GameTurn::getWeekDay))
-                                    .map(GameTurnHistoryDTO::fromEntity)
-                                    .toList();
-                        },
-                        (existing, replacement) -> existing));
+        // 3. Group the turns by Player Role
+        Map<String, List<GameTurnHistoryDTO>> response = new HashMap<>();
+
+        for (GameTurn turn : allTurns) {
+            // Safety check
+            if (turn.getPlayer() == null || turn.getPlayer().getRole() == null)
+                continue;
+
+            String roleKey = turn.getPlayer().getRole().toString(); // e.g., "DISTRIBUTOR"
+
+            // Initialize list if not exists
+            response.putIfAbsent(roleKey, new ArrayList<>());
+
+            // Add the converted DTO
+            response.get(roleKey).add(GameTurnHistoryDTO.fromEntity(turn));
+        }
+
+        // 4. Sort the lists by week number (Just to be clean)
+        for (List<GameTurnHistoryDTO> historyList : response.values()) {
+            historyList.sort(Comparator.comparingInt(GameTurnHistoryDTO::weekDay));
+        }
+
+        log.info("Fetched history for game {}: found {} total turns.", gameId, allTurns.size());
+
+        return response;
     }
 
 }
