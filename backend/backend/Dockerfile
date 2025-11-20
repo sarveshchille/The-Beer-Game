@@ -12,9 +12,6 @@ WORKDIR /app
 
 COPY --from=build /app/target/backend-0.0.1-SNAPSHOT.jar app.jar
 
-# This EXPOSE value does NOT matter to Render, but keep 8080 as standard
 EXPOSE 8080
 
-# 💥 IMPORTANT FIX: Added -Djava.net.preferIPv4Stack=true
-# This forces Java to use IPv4, preventing the "SocketTimeout" error when connecting to Gmail on Render
-ENTRYPOINT ["sh", "-c", "java -Djava.net.preferIPv4Stack=true -jar app.jar --server.port=$PORT"]
+ENTRYPOINT ["sh", "-c", "java -jar app.jar --server.port=$PORT"]
