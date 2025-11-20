@@ -21,4 +21,14 @@ public interface GameRepository extends JpaRepository<Game, String> {
             WHERE g.id = :id
             """)
     Optional<Game> findByIdWithPlayers(String id);
+
+    @Query("""
+            SELECT DISTINCT g
+            FROM Game g
+            LEFT JOIN FETCH g.players p
+            LEFT JOIN FETCH p.turnHistory th
+            LEFT JOIN FETCH p.playerInfo pi
+            WHERE g.id = :id
+            """)
+    Optional<Game> findByIdWithPlayersAndTurnHistory(String id);
 }

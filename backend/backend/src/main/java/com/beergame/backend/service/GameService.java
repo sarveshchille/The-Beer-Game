@@ -2,6 +2,7 @@ package com.beergame.backend.service;
 
 import com.beergame.backend.config.GameConfig;
 import com.beergame.backend.dto.GameStateDTO;
+import com.beergame.backend.dto.GameTurnHistoryDTO;
 import com.beergame.backend.dto.RoomStateDTO;
 import com.beergame.backend.model.Game;
 import com.beergame.backend.model.GameRoom;
@@ -26,11 +27,16 @@ import org.springframework.transaction.support.TransactionSynchronizationAdapter
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
+import java.util.stream.Collector;
 import java.util.stream.Collectors;
 
 @Service
@@ -486,8 +492,43 @@ public class GameService {
         redisTemplate.convertAndSend(channel, roomState);
     }
 
-    public Game getGameWithPlayers(String gameId) {
-        return gameRepository.findByIdWithPlayers(gameId)
-                .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
+    @Transactional(readOnly = true)
+    public Map<String, List<GameTurnHistoryDTO>> getGameHistory(String gameId) {
+
+        // 1. Fast check if game exists
+        if (!gameRepository.existsById(gameId)) {
+            throw new RuntimeException("Game not found: " + gameId);
+        }
+
+        // 2. ✅ THE FIX: Fetch ALL history for this game directly
+        // This avoids the "MultipleBagFetchException" completely.
+        List<GameTurn> allTurns = gameTurnRepository.findByPlayer_Game_Id(gameId);
+
+        // 3. Group the turns by Player Role
+        Map<String, List<GameTurnHistoryDTO>> response = new HashMap<>();
+
+        for (GameTurn turn : allTurns) {
+            // Safety check
+            if (turn.getPlayer() == null || turn.getPlayer().getRole() == null)
+                continue;
+
+            String roleKey = turn.getPlayer().getRole().toString(); // e.g., "DISTRIBUTOR"
+
+            // Initialize list if not exists
+            response.putIfAbsent(roleKey, new ArrayList<>());
+
+            // Add the converted DTO
+            response.get(roleKey).add(GameTurnHistoryDTO.fromEntity(turn));
+        }
+
+        // 4. Sort the lists by week number (Just to be clean)
+        for (List<GameTurnHistoryDTO> historyList : response.values()) {
+            historyList.sort(Comparator.comparingInt(GameTurnHistoryDTO::weekDay));
+        }
+
+        log.info("Fetched history for game {}: found {} total turns.", gameId, allTurns.size());
+
+        return response;
     }
+
 }

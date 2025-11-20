@@ -13,7 +13,8 @@ public record PlayerStateDTO(
         double weeklyCost,
         double totalCost,
         boolean isReadyForNextTurn,
-        int lastOrderReceived // 👈 --- 1. ADD THIS LINE
+        int lastOrderReceived,
+        String gameId // 👈 1. ADD THIS FIELD (The Golden Key)
 ) {
     public static PlayerStateDTO fromPlayer(Players player) {
         return new PlayerStateDTO(
@@ -27,7 +28,8 @@ public record PlayerStateDTO(
                 player.getWeeklyCost(),
                 player.getTotalCost(),
                 player.isReadyForOrder(),
-                player.getLastOrderReceived() // 👈 --- 2. ADD THIS LINE
-        );
+                player.getLastOrderReceived(),
+                // 👈 2. SAFELY GET THE GAME ID
+                (player.getGame() != null) ? player.getGame().getId() : null);
     }
 }
