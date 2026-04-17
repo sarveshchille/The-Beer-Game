@@ -1,101 +1,104 @@
 package com.beergame.backend.config;
 
+import java.security.SecureRandom;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Random;
 import java.util.Set;
 
 /**
- * Holds all the static rules, costs, and demand for the game.
- * Ported from your friend's code.
+ * Holds all the static rules, costs, and demand schedule for the game.
+ *
+ * CHANGE: Removed the JVM-global static FESTIVE_WEEKS Set.
+ *
+ * The old design picked 3 random weeks ONCE when the class was loaded by the
+ * JVM. Every game created in that JVM session had identical festive weeks,
+ * which makes all concurrent games predictable and defeats the randomness
+ * entirely.
+ *
+ * New design:
+ *  - generateFestiveWeeks() creates a fresh random set for each game.
+ *  - isFestiveWeek(week, festiveWeeks) and getCustomerDemand(week, festiveWeeks)
+ *    accept the game-specific set as a parameter.
+ *  - The old 0-argument versions are retained as deprecated so nothing breaks
+ *    during migration.
  */
 public class GameConfig {
 
-    // --- Game Rules ---
-    public static final int GAME_WEEKS = 25;
-    public static final int INITIAL_INVENTORY = 150;
+    // ── Game rules ────────────────────────────────────────────────────────────
+    public static final int    GAME_WEEKS             = 25;
+    public static final int    INITIAL_INVENTORY      = 150;
+    public static final int    INITIAL_PIPELINE_LEVEL = 20;
 
-    /**
-     * The initial order level in the pipeline.
-     * This will be the order that Wholesaler, Distributor, and Producer
-     * receive in Week 1.
-     */
-    public static final int INITIAL_PIPELINE_LEVEL = 20;
+    // ── Cost rules ────────────────────────────────────────────────────────────
+    public static final double INVENTORY_HOLDING_COST = 0.75;
+    public static final double BACKORDER_COST         = 1.50;
 
-    // --- Cost Rules ---
-    public static final double INVENTORY_HOLDING_COST = 0.75; // 75 cents per unit
-    public static final double BACKORDER_COST = 1.50; // 1.5 per unit
+    private static final SecureRandom RANDOM = new SecureRandom();
 
-    /**
-     * The base customer demand for the Retailer.
-     * The first value is 20 to meet the Week 1 requirement.
-     */
+    // ── Demand schedule ───────────────────────────────────────────────────────
     private static final int[] BASE_DEMAND_SCHEDULE = {
-            // Week: 1 2 3 4 5 6 7 8 9 10 11 12 13
-            20, 30, 40, 40, 40, 40, 60, 60, 60, 80, 80, 80, 60,
-            // Week: 14 15 16 17 18 19 20 21 22 23 24 25
-            60, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80
+            // Weeks  1   2   3   4   5   6   7   8   9  10  11  12  13
+                     20, 30, 40, 40, 40, 40, 60, 60, 60, 80, 80, 80, 60,
+            // Weeks 14  15  16  17  18  19  20  21  22  23  24  25
+                     60, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80
     };
 
-    /**
-     * Stores the 3 randomly selected "festive weeks"
-     * where demand will be double the previous week.
-     */
-    private static final Set<Integer> FESTIVE_WEEKS = new HashSet<>();
+    // ── Festive week generation ───────────────────────────────────────────────
 
     /**
-     * This `static` block runs once when the class is loaded.
-     * It picks the 3 random festive weeks.
+     * Generates a new set of 3 unique random festive weeks in range [6, 22].
+     * Call this once per game at creation time and store the result in the
+     * Game entity (Game.festiveWeeks).
      */
-    static {
-        Random rand = new Random();
-        // Loop until we have 3 unique weeks
-        while (FESTIVE_WEEKS.size() < 3) {
-            // Generates a random week from 6 to 22 (inclusive)
-            int randomWeek = rand.nextInt(17) + 6; // (0-16) + 6 = 6-22
-            FESTIVE_WEEKS.add(randomWeek);
+    public static Set<Integer> generateFestiveWeeks() {
+        Set<Integer> festiveWeeks = new HashSet<>();
+        while (festiveWeeks.size() < 3) {
+            festiveWeeks.add(RANDOM.nextInt(17) + 6); // 6..22 inclusive
         }
-        System.out.println("--- Game Initialized with Festive Weeks: " + FESTIVE_WEEKS + " ---");
+        return festiveWeeks;
     }
 
-    /**
-     * Gets the customer demand for a given week.
-     * This is ONLY for the Retailer.
-     * 
-     * @param week The current week (1-based)
-     * @return The customer demand for that week.
-     */
-    public static int getCustomerDemand(int week) {
-        if (week <= 0)
-            return 0;
+    // ── Per-game demand / festivity queries ───────────────────────────────────
 
-        // Check for festive week (but not for week 1)
-        if (week > 1 && FESTIVE_WEEKS.contains(week)) {
-            // Demand is double the *previous* week's demand
-            // We use recursion to ensure this stacks correctly
-            return getCustomerDemand(week - 1) * 2;
+    /**
+     * Returns the customer demand for the retailer in {@code week},
+     * using the provided game-specific festive weeks set.
+     *
+     * @param week        1-based week number
+     * @param festiveWeeks the set stored on the Game entity
+     */
+    public static int getCustomerDemand(int week, Set<Integer> festiveWeeks) {
+        if (week <= 0) return 0;
+
+        if (week > 1 && festiveWeeks.contains(week)) {
+            return getCustomerDemand(week - 1, festiveWeeks) * 2;
         }
 
-        // Handle weeks outside the schedule (e.g., if GAME_WEEKS > 25)
         if (week > BASE_DEMAND_SCHEDULE.length) {
-            return BASE_DEMAND_SCHEDULE[BASE_DEMAND_SCHEDULE.length - 1]; // Use last value
+            return BASE_DEMAND_SCHEDULE[BASE_DEMAND_SCHEDULE.length - 1];
         }
 
-        // Return the demand from the base schedule
-        return BASE_DEMAND_SCHEDULE[week - 1]; // -1 for 0-based array index
-    }
-
-    public static boolean isFestiveWeek(int week) {
-        return FESTIVE_WEEKS.contains(week);
+        return BASE_DEMAND_SCHEDULE[week - 1];
     }
 
     /**
-     * Public helper to get the complete list of festive weeks.
-     * 
-     * @return A List of the random festive week numbers.
+     * Returns whether {@code week} is a festive week for the given game.
+     *
+     * @param week        1-based week number
+     * @param festiveWeeks the set stored on the Game entity
      */
-    public static List<Integer> getFestiveWeeks() {
-        // Convert the Set to a List for the DTO
-        return List.copyOf(FESTIVE_WEEKS);
+    public static boolean isFestiveWeek(int week, Set<Integer> festiveWeeks) {
+        return festiveWeeks.contains(week);
+    }
+
+    /**
+     * Convenience: returns the festive weeks as a sorted List (for DTO
+     * serialisation where order matters for the frontend).
+     */
+    public static List<Integer> getFestiveWeeksSorted(Set<Integer> festiveWeeks) {
+        List<Integer> sorted = new ArrayList<>(festiveWeeks);
+        sorted.sort(Integer::compareTo);
+        return sorted;
     }
 }

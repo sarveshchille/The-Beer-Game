@@ -1,17 +1,25 @@
 package com.beergame.backend.repository;
 
+import com.beergame.backend.model.Game;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Query;
-
-import com.beergame.backend.model.Game;
-
 public interface GameRepository extends JpaRepository<Game, String> {
 
-    List<Game> findByGameStatusAndCreatedAt(Game.GameStatus status, LocalDateTime localDateTime);
+    /**
+     * FIX: original signature was findByGameStatusAndCreatedAt(status, dateTime)
+     * which matches an EXACT timestamp — almost never returns results and was
+     * therefore useless for the cleanup job.
+     *
+     * Renamed to findByGameStatusAndCreatedAtBefore so Spring generates
+     * WHERE game_status = ? AND created_at < ? which is what CleanupService
+     * actually needs.
+     */
+    List<Game> findByGameStatusAndCreatedAtBefore(Game.GameStatus status, LocalDateTime cutoff);
 
     @Query("""
             SELECT DISTINCT g
@@ -31,4 +39,5 @@ public interface GameRepository extends JpaRepository<Game, String> {
             WHERE g.id = :id
             """)
     Optional<Game> findByIdWithPlayersAndTurnHistory(String id);
+    List<Game> findByGameStatus(Game.GameStatus status);
 }

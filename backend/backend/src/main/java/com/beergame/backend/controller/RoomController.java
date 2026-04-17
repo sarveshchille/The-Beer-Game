@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -25,7 +26,7 @@ public class RoomController {
 
     @PostMapping("/{roomId}/join")
     public ResponseEntity<GameRoom> joinRoom(@PathVariable String roomId,
-            @RequestBody JoinRoomRequestDTO request,
+            @Validated @RequestBody JoinRoomRequestDTO request,
             @AuthenticationPrincipal UserDetails userDetails) {
 
         GameRoom room = roomManagerService.joinRoom(

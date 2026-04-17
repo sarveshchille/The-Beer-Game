@@ -94,6 +94,17 @@ public class Players {
     @JoinColumn(name = "initialTeamId")
     private Team initialTeam;
 
+    @Column(name = "is_bot")
+private boolean isBot = false;
+
+@Enumerated(EnumType.STRING)
+@Column(name = "bot_type")
+private BotType botType; // null if human
+
+// Tracks if this player went AFK this turn (for frontend display)
+@Column(name = "is_afk")
+private boolean afk = false;
+
     public enum RoleType {
         RETAILER,
         WHOLESALER,

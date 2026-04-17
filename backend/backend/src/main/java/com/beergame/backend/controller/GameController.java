@@ -1,5 +1,6 @@
 package com.beergame.backend.controller;
 
+import com.beergame.backend.dto.AddBotRequestDTO;
 import com.beergame.backend.dto.GameStateDTO;
 import com.beergame.backend.dto.JoinGameRequestDTO;
 import com.beergame.backend.model.Game;
@@ -9,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -21,7 +23,7 @@ public class GameController {
     @PostMapping("/create")
     public ResponseEntity<GameStateDTO> createGame(
             @AuthenticationPrincipal UserDetails userDetails,
-            @RequestBody JoinGameRequestDTO request) {
+            @RequestBody @Validated JoinGameRequestDTO request) {
 
         if (userDetails == null) {
             return ResponseEntity.status(401).build();
@@ -45,7 +47,7 @@ public class GameController {
 
     @PostMapping("/{gameId}/join")
     public ResponseEntity<GameStateDTO> joinGame(@PathVariable String gameId,
-            @RequestBody JoinGameRequestDTO request,
+            @Validated @RequestBody JoinGameRequestDTO request,
             @AuthenticationPrincipal UserDetails userDetails) {
         if (userDetails == null) {
             return ResponseEntity.status(401).build();
@@ -64,4 +66,16 @@ public class GameController {
         }
         return ResponseEntity.ok(gameService.getGameHistory(gameId));
     }
+
+    @PostMapping("/{gameId}/addBot")
+public ResponseEntity<GameStateDTO> addBot(
+        @PathVariable String gameId,
+        @RequestBody AddBotRequestDTO request,
+        @AuthenticationPrincipal UserDetails userDetails) {
+
+    if (userDetails == null) return ResponseEntity.status(401).build();
+
+    Game game = gameService.addBot(gameId, request.role(), request.botType());
+    return ResponseEntity.ok(GameStateDTO.fromGame(game));
+}
 }

@@ -1,9 +1,8 @@
 package com.beergame.backend.service;
 
 import com.beergame.backend.config.GameConfig;
-import com.beergame.backend.dto.GameStateDTO;
 import com.beergame.backend.dto.GameTurnHistoryDTO;
-import com.beergame.backend.dto.RoomStateDTO;
+import com.beergame.backend.model.BotType;
 import com.beergame.backend.model.Game;
 import com.beergame.backend.model.GameRoom;
 import com.beergame.backend.model.GameTurn;
@@ -16,51 +15,63 @@ import com.beergame.backend.repository.PlayerInfoRepository;
 import com.beergame.backend.repository.PlayerRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.annotation.Lazy;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-// ✅ ADD THESE
-import org.springframework.transaction.support.TransactionSynchronizationManager;
-import org.springframework.transaction.support.TransactionSynchronizationAdapter;
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
+/**
+ * Changes from the original:
+ *
+ *  1. synchronized(gameId.intern()) → RedisLockService (cluster-safe).
+ *  2. advanceTurn / postAdvanceRoomTurn moved to TurnService so Spring's proxy
+ *     intercepts @Transactional (self-invocation bypass fixed; @Lazy self gone).
+ *  3. broadcast methods moved to BroadcastService (no circular deps).
+ *  4. placeOrder: only registers ONE broadcast — either intermediate state OR
+ *     lets advanceTurn register it, never both.
+ *  5. submitRoomOrder: intermediate broadcast is now post-commit safe.
+ *  6. generateUniqueGameId: bounded retry loop with clear error on exhaustion.
+ *  7. joinGame: uses game.getCurrentWeek() instead of hardcoded 1 for retailer.
+ *  8. placeOrder: order amount validated with upper bound.
+ *  9. Game entity now has @Version (optimistic locking) — see Game.java.
+ * 10. Batch saves (saveAll) are handled inside TurnService.
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 @Transactional
 public class GameService {
 
-    private final GameRepository gameRepository;
-    private final PlayerRepository playerRepository;
+    // ── Maximum order a player may place in one turn ──────────────────────────
+    // Prevents accidental or malicious integer overflow / runaway costs.
+    public static final int MAX_ORDER_AMOUNT = 9_999;
+
+    // ── ID generation ─────────────────────────────────────────────────────────
+    private static final int    MAX_ID_RETRIES = 10;
+    private static final String ALPHANUMERIC   = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    private static final SecureRandom RANDOM   = new SecureRandom();
+
+    // ── Dependencies ──────────────────────────────────────────────────────────
+    private final GameRepository       gameRepository;
+    private final PlayerRepository     playerRepository;
     private final PlayerInfoRepository playerInfoRepository;
-    private final GameTurnRepository gameTurnRepository;
-    private final RedisTemplate<String, Object> redisTemplate;
-    private final GameRoomRepository gameRoomRepository;
+    private final GameTurnRepository   gameTurnRepository;
+    private final GameRoomRepository   gameRoomRepository;
     private final RoomAdvancementService roomAdvancementService;
 
-    private static final String ALPHANUMERIC = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    private static final SecureRandom RANDOM = new SecureRandom();
+    // New extracted services
+    private final RedisLockService   redisLockService;
+    private final TurnService        turnService;
+    private final BroadcastService   broadcastService;
+    private final BotService botService;
+    private final AfkDetectionService afkDetectionService;
 
-    private GameService self;
-
-    @Autowired
-    @Lazy
-    public void setSelf(GameService self) {
-        this.self = self;
-    }
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Helpers
+    // ─────────────────────────────────────────────────────────────────────────
 
     private String generateRandomId(int length) {
         StringBuilder sb = new StringBuilder(length);
@@ -71,78 +82,134 @@ public class GameService {
     }
 
     /**
-     * Create a single game (lobby).
+     * Generates a unique 10-character game ID.
+     * Bounded to MAX_ID_RETRIES attempts — avoids an infinite loop in the
+     * (astronomically unlikely) case of repeated collisions.
      */
-    public Game createGame(String creatorUsername) {
-        playerInfoRepository.findByUserName(creatorUsername)
-                .orElseThrow(() -> new RuntimeException("User not found"));
-
-        Game game = new Game();
-        String newGameId = generateRandomId(10);
-        while (gameRepository.existsById(newGameId)) {
-            newGameId = generateRandomId(10);
+    private String generateUniqueGameId() {
+        for (int attempt = 0; attempt < MAX_ID_RETRIES; attempt++) {
+            String id = generateRandomId(10);
+            if (!gameRepository.existsById(id)) {
+                return id;
+            }
+            log.warn("Game ID collision on attempt {}: {}", attempt + 1, id);
         }
-        game.setId(newGameId);
-        game.setGameStatus(Game.GameStatus.LOBBY);
-        game.setCurrentWeek(1);
-        game.setCreatedAt(LocalDateTime.now());
-        game.setFestiveWeek(GameConfig.isFestiveWeek(1));
-
-        log.info("Creating new game. ID will be generated on save.");
-        Game savedGame = gameRepository.save(game);
-        log.info("Created new game with id: {}", savedGame.getId());
-        return savedGame;
+        throw new RuntimeException(
+                "Failed to generate a unique game ID after " + MAX_ID_RETRIES + " attempts");
     }
 
     /**
-     * Join an existing game as a role.
-     * Synchronized on gameId.intern() to avoid concurrent duplicate inserts
-     * when multiple requests try to join the same game at the same time.
-     */
+ * Adds a bot player to fill an empty role slot.
+ * The creator calls this when they want to start with fewer than 4 humans.
+ */
+public Game addBot(String gameId, Players.RoleType role, BotType botType) {
+    String botUsername = "BOT_" + botType.name() + "_" + role.name();
+    // Reuse joinGame — creates the player entry the same way
+    // Bot players are identified by the isBot flag, not username pattern
+    return redisLockService.executeWithLock(gameId, 10, () -> {
+        Game game = gameRepository.findByIdWithPlayers(gameId)
+                .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
+
+        boolean roleTaken = game.getPlayers().stream()
+                .anyMatch(p -> p.getRole() == role);
+        if (roleTaken) throw new RuntimeException("Role " + role + " already taken");
+
+        Players bot = new Players();
+        bot.setUserName(botUsername);
+        bot.setRole(role);
+        bot.setBot(true);
+        bot.setBotType(botType);
+        bot.setInventory(GameConfig.INITIAL_INVENTORY);
+        bot.setBackOrder(0);
+        bot.setWeeklyCost(0);
+        bot.setTotalCost(0);
+        bot.setReadyForOrder(false);
+
+        int currentWeek = game.getCurrentWeek();
+        if (role == Players.RoleType.RETAILER) {
+            bot.setOrderArrivingNextWeek(
+                GameConfig.getCustomerDemand(currentWeek, game.getFestiveWeeks()));
+        } else {
+            bot.setOrderArrivingNextWeek(GameConfig.INITIAL_PIPELINE_LEVEL);
+        }
+        bot.setIncomingShipment(GameConfig.INITIAL_PIPELINE_LEVEL);
+        bot.setShipmentArrivingWeekAfterNext(GameConfig.INITIAL_PIPELINE_LEVEL);
+        bot.setGame(game);
+
+        game.getPlayers().add(bot);
+        playerRepository.save(bot);
+
+        if (game.getPlayers().size() == 4 && game.getGameStatus() == Game.GameStatus.LOBBY) {
+            game.setGameStatus(Game.GameStatus.IN_PROGRESS);
+            gameRepository.save(game);
+        }
+
+        broadcastService.broadcastGameAfterCommit(gameId);
+        return game;
+    });
+}
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Game lifecycle
+    // ─────────────────────────────────────────────────────────────────────────
+
     /**
-     * Join an existing game as a role.
-     * Synchronized on gameId.intern() to avoid concurrent duplicate inserts
-     * when multiple requests try to join the same game at the same time.
+     * Creates a new game lobby.
      */
+    public Game createGame(String creatorUsername) {
+        playerInfoRepository.findByUserName(creatorUsername)
+                .orElseThrow(() -> new RuntimeException("User not found: " + creatorUsername));
+
+        Game game = new Game();
+        game.setId(generateUniqueGameId());
+        game.setGameStatus(Game.GameStatus.LOBBY);
+        game.setCurrentWeek(1);
+        game.setCreatedAt(LocalDateTime.now());
+        game.setFestiveWeeks(GameConfig.generateFestiveWeeks());
+        game.setFestiveWeek(GameConfig.isFestiveWeek(1, game.getFestiveWeeks()));
+
+        Game saved = gameRepository.save(game);
+        log.info("Created game id={}", saved.getId());
+        return saved;
+    }
+
     /**
-     * Join an existing game as a role.
-     * Synchronized on gameId.intern() to avoid concurrent duplicate inserts
-     * when multiple requests try to join the same game at the same time.
+     * Adds a player to an existing game as the requested role.
+     *
+     * Uses a Redis distributed lock (not JVM synchronized) so the
+     * race-condition protection works across multiple server instances.
      */
     public Game joinGame(String gameIdRaw, String username, Players.RoleType role) {
-
-        if (gameIdRaw == null)
+        if (gameIdRaw == null) {
             throw new RuntimeException("gameId is null");
-
+        }
         String gameId = gameIdRaw.trim();
 
-        // synchronize per-game to avoid duplicate inserts / race around roles
-        synchronized (gameId.intern()) {
+        return redisLockService.executeWithLock(gameId, 10, () -> {
 
             Game game = gameRepository.findByIdWithPlayers(gameId)
-                    .orElseThrow(() -> new RuntimeException("Game not found: ".concat(gameId)));
+                    .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
 
             PlayerInfo playerInfo = playerInfoRepository.findByUserName(username)
-                    .orElseThrow(() -> new RuntimeException("User not found: ".concat(username)));
+                    .orElseThrow(() -> new RuntimeException("User not found: " + username));
 
-            // CASE 1: PLAYER ALREADY IN GAME
-            Optional<Players> existing = playerRepository.findByGameAndPlayerInfoUserName(game, username);
+            // ── Case 1: player already joined ─────────────────────────────────
+            Optional<Players> existing =
+                    playerRepository.findByGameAndPlayerInfoUserName(game, username);
             if (existing.isPresent()) {
-                log.info("Player {} already in game {} — returning existing game", username, gameId);
-
-                // Just broadcast the current state to ensure this user gets it
-                broadcastAfterCommit(gameId);
-                return game; // Return the game we already loaded
+                log.info("Player {} already in game {} — returning current state.", username, gameId);
+                broadcastService.broadcastGameAfterCommit(gameId);
+                return game;
             }
 
-            // CASE 2: NEW PLAYER - CHECK ROLE IS FREE
+            // ── Case 2: role already taken ────────────────────────────────────
             boolean roleTaken = game.getPlayers().stream()
                     .anyMatch(p -> p.getRole() == role);
             if (roleTaken) {
-                throw new RuntimeException("Role " + role + " already taken");
+                throw new RuntimeException("Role " + role + " is already taken in game " + gameId);
             }
 
-            // CREATE NEW PLAYER ENTRY
+            // ── Case 3: create new player entry ───────────────────────────────
             Players player = new Players();
             player.setUserName(playerInfo.getUserName());
             player.setPlayerInfo(playerInfo);
@@ -153,380 +220,212 @@ public class GameService {
             player.setTotalCost(0);
             player.setReadyForOrder(false);
 
-            if (role == Players.RoleType.RETAILER)
-                player.setOrderArrivingNextWeek(GameConfig.getCustomerDemand(1));
-            else
+            // FIX: use the game's actual currentWeek, not hardcoded 1.
+            // (Matters if, e.g., a player reconnects mid-game to a saved lobby.)
+            int currentWeek = game.getCurrentWeek();
+            if (role == Players.RoleType.RETAILER){
+                player.setOrderArrivingNextWeek(GameConfig.getCustomerDemand(currentWeek, game.getFestiveWeeks()));
+                
+            } else {
                 player.setOrderArrivingNextWeek(GameConfig.INITIAL_PIPELINE_LEVEL);
-
+            }
             player.setIncomingShipment(GameConfig.INITIAL_PIPELINE_LEVEL);
             player.setShipmentArrivingWeekAfterNext(GameConfig.INITIAL_PIPELINE_LEVEL);
             player.setGame(game);
 
-            // ✅ --- THIS IS THE FIX --- ✅
-            // Manually add the new player to the game's in-memory list.
-            // This ensures the 'game' object we return is 100% up-to-date
-            // for the HTTP response, fixing the race condition.
+            // Add to in-memory list before saving so the returned Game object
+            // is always consistent with what was just persisted.
             game.getPlayers().add(player);
-
-            // Now, save the new player. Spring will handle cascading.
             playerRepository.save(player);
             log.info("Player {} joined game {} as {}", username, gameId, role);
 
-            // AUTO-START WHEN 4 PLAYERS JOIN
-            // We can now safely check the in-memory list
-            if (game.getPlayers().size() == 4 && game.getGameStatus() == Game.GameStatus.LOBBY) {
+            // Auto-start when all 4 roles are filled
+            if (game.getPlayers().size() == 4
+                    && game.getGameStatus() == Game.GameStatus.LOBBY) {
                 game.setGameStatus(Game.GameStatus.IN_PROGRESS);
-                gameRepository.save(game); // Save the game status change
-                log.info("Game {} moved to IN_PROGRESS (players: {})", gameId, game.getPlayers().size());
+                gameRepository.save(game);
+                log.info("Game {} → IN_PROGRESS", gameId);
             }
 
-            // Broadcast the new state AFTER the transaction commits
-            // (This notifies all *other* players)
-            broadcastAfterCommit(gameId);
-
-            // ✅ Return the IN-MEMORY 'game' object, which now has the new player
+            broadcastService.broadcastGameAfterCommit(gameId);
             return game;
-        }
-    }
-
-    /**
-     * Safely broadcasts the game state ONLY after the current database transaction
-     * has successfully committed. This prevents all race conditions.
-     */
-
-    /**
-     * Safely broadcasts the game state ONLY after the current database transaction
-     * has successfully committed. This prevents all race conditions.
-     */
-    private void broadcastAfterCommit(String gameId) {
-
-        // Use TransactionSynchronizationAdapter to only override the method we need
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronizationAdapter() {
-
-            @Override
-            public void afterCommit() {
-                // This code runs *after* the database commit
-                log.info("Transaction committed for game {}. Broadcasting state.", gameId);
-
-                // Re-fetch the game state AFTER commit to ensure data is fresh
-                try {
-                    Game freshGame = gameRepository.findByIdWithPlayers(gameId)
-                            .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
-
-                    broadcastGameState(freshGame); // This is your existing method
-                } catch (Exception e) {
-                    log.error("Failed to broadcast game state after commit for id {}: {}", gameId, e.getMessage(), e);
-                }
-            }
         });
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Single-game order placement
+    // ─────────────────────────────────────────────────────────────────────────
+
     /**
-     * Player places order for a single game.
-     */
-    /**
-     * Player places order for a single game.
+     * Records a player's order for the current week.
+     *
+     * Broadcast strategy (fixes the double-broadcast bug):
+     *  • Not all ready  → register one post-commit broadcast showing
+     *                     intermediate "player X is ready" state.
+     *  • All ready      → delegate to turnService.advanceTurn(), which registers
+     *                     its own post-commit broadcast. We do NOT register a
+     *                     second one here.
+     *
+     * Since turnService.advanceTurn() is annotated @Transactional(REQUIRED), it
+     * joins this method's transaction. Both the player save and the full turn
+     * advance commit atomically. Hibernate flushes the player save before
+     * advanceTurn's queries run, so the allReady check inside advanceTurn sees
+     * consistent data.
      */
     public void placeOrder(String gameId, String username, int orderAmount) {
+        // ── Validate ──────────────────────────────────────────────────────────
+        if (orderAmount < 0 || orderAmount > MAX_ORDER_AMOUNT) {
+            throw new IllegalArgumentException(
+                    "Order amount must be 0–" + MAX_ORDER_AMOUNT + ", got: " + orderAmount);
+        }
+
         Game game = gameRepository.findByIdWithPlayers(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
 
         Players player = playerRepository.findByGameAndPlayerInfoUserName(game, username)
-                .orElseThrow(() -> new RuntimeException("Player not in this game"));
+                .orElseThrow(() -> new RuntimeException("Player not in game: " + username));
 
         if (player.isReadyForOrder()) {
-            log.warn("Player {} already submitted order for week {}", username, game.getCurrentWeek());
+            log.warn("Player {} already submitted an order for week {}", username, game.getCurrentWeek());
             return;
         }
 
-        // ✅ FIX: Update the player object IN MEMORY
-        player.setCurrentOrder(Math.max(0, orderAmount));
+        // 'player' is a Hibernate managed entity. Mutating it here is immediately
+        // visible to game.getPlayers() (same session identity map), so the
+        // allReady check below is accurate without a re-fetch.
+        player.setCurrentOrder(orderAmount);
         player.setReadyForOrder(true);
-        playerRepository.save(player); // Save the change
+        playerRepository.save(player);
+
+        game.getPlayers().stream()
+    .filter(p -> p.isBot() && !p.isReadyForOrder())
+    .forEach(bot -> botService.submitBotOrder(game, bot));
 
         log.info("Player {} placed order {} for week {}", username, orderAmount, game.getCurrentWeek());
 
-        // Broadcast the new state (showing this player as "ready")
-        // This will go out after the 'save' commits
-        broadcastAfterCommit(gameId);
-
-        // ✅ FIX: Check the IN-MEMORY list, which we know is up-to-date
-        List<Players> players = game.getPlayers();
-        if (players == null || players.size() < 4) {
+        if (game.getPlayers() == null || game.getPlayers().size() < 4) {
+            broadcastService.broadcastGameAfterCommit(gameId);
             return;
         }
 
-        // This check will now succeed when the 4th player submits
-        boolean allReady = players.stream().allMatch(Players::isReadyForOrder);
+        boolean allReady = game.getPlayers().stream().allMatch(Players::isReadyForOrder);
+
         if (allReady) {
             log.info("All players ready for game {}. Advancing turn.", gameId);
-            // This call will run in a new transaction
-            // (thanks to the @Transactional on advanceTurn)
-            advanceTurn(gameId);
+            // advanceTurn joins this transaction and registers its own post-commit
+            // broadcast — do NOT register another one here.
+            afkDetectionService.clearWeekTimer(gameId, game.getCurrentWeek());
+            turnService.advanceTurn(gameId);
+        } else {
+            // Intermediate state: just let clients know this player is ready.
+            broadcastService.broadcastGameAfterCommit(gameId);
         }
     }
 
-    /**
-     * Advance a single game's turn. Transactional to ensure DB consistency.
-     */
-    @Transactional
-    public void advanceTurn(String gameId) {
-        Game game = gameRepository.findByIdWithPlayers(gameId)
-                .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
-
-        if (game.getPlayers() == null || game.getPlayers().isEmpty()) {
-            log.warn("Tried to advance game {} with no players.", gameId);
-            return;
-        }
-
-        int currentWeek = game.getCurrentWeek();
-
-        Map<Players.RoleType, Players> playerMap = game.getPlayers().stream()
-                .collect(Collectors.toMap(Players::getRole, Function.identity()));
-
-        Players retailer = playerMap.get(Players.RoleType.RETAILER);
-        Players wholesaler = playerMap.get(Players.RoleType.WHOLESALER);
-        Players distributor = playerMap.get(Players.RoleType.DISTRIBUTOR);
-        Players manufacturer = playerMap.get(Players.RoleType.MANUFACTURER);
-
-        if (retailer == null || wholesaler == null || distributor == null || manufacturer == null) {
-            log.error("Game {} is in an invalid state: missing one or more roles.", gameId);
-            return;
-        }
-
-        // Loop 1: receive shipments, fulfill orders
-        for (Players p : game.getPlayers()) {
-            int shipmentReceived = p.getIncomingShipment();
-            p.setLastShipmentReceived(shipmentReceived);
-            p.setInventory(p.getInventory() + shipmentReceived);
-            p.setIncomingShipment(p.getShipmentArrivingWeekAfterNext());
-            p.setShipmentArrivingWeekAfterNext(0);
-
-            int orderReceived = (p.getRole() == Players.RoleType.RETAILER)
-                    ? GameConfig.getCustomerDemand(currentWeek)
-                    : p.getOrderArrivingNextWeek();
-
-            p.setLastOrderReceived(orderReceived);
-            if (p.getRole() != Players.RoleType.RETAILER)
-                p.setOrderArrivingNextWeek(0);
-
-            int totalDemand = orderReceived + p.getBackOrder();
-            int shipmentSent;
-            if (p.getInventory() >= totalDemand) {
-                shipmentSent = totalDemand;
-                p.setInventory(p.getInventory() - totalDemand);
-                p.setBackOrder(0);
-            } else {
-                shipmentSent = p.getInventory();
-                p.setBackOrder(totalDemand - p.getInventory());
-                p.setInventory(0);
-            }
-            p.setOutgoingDelivery(shipmentSent);
-
-            double holdingCost = p.getInventory() * GameConfig.INVENTORY_HOLDING_COST;
-            double backlogCost = p.getBackOrder() * GameConfig.BACKORDER_COST;
-            double weeklyCost = holdingCost + backlogCost;
-            p.setWeeklyCost(weeklyCost);
-            p.setTotalCost(p.getTotalCost() + weeklyCost);
-        }
-
-        // Loop 2: place & advance pipeline orders
-        wholesaler.setOrderArrivingNextWeek(retailer.getCurrentOrder());
-        distributor.setOrderArrivingNextWeek(wholesaler.getCurrentOrder());
-        manufacturer.setOrderArrivingNextWeek(distributor.getCurrentOrder());
-
-        manufacturer.setShipmentArrivingWeekAfterNext(manufacturer.getCurrentOrder());
-        distributor.setShipmentArrivingWeekAfterNext(manufacturer.getOutgoingDelivery());
-        wholesaler.setShipmentArrivingWeekAfterNext(distributor.getOutgoingDelivery());
-        retailer.setShipmentArrivingWeekAfterNext(wholesaler.getOutgoingDelivery());
-
-        // Loop 3: log history and reset players
-        for (Players p : game.getPlayers()) {
-            GameTurn turn = new GameTurn();
-            turn.setWeekDay(currentWeek);
-            turn.setPlayer(p);
-
-            turn.setOrderPlaced(p.getCurrentOrder());
-            turn.setDemandRecieved(p.getLastOrderReceived());
-            turn.setShipmentSent(p.getOutgoingDelivery());
-            turn.setShipmentRecieved(p.getLastShipmentReceived());
-            turn.setInventoryAtEndOfWeek(p.getInventory());
-            turn.setBackOrderAtEndOfWeek(p.getBackOrder());
-            turn.setWeeklyCost(p.getWeeklyCost());
-            turn.setTotalCost(p.getTotalCost());
-
-            gameTurnRepository.save(turn);
-
-            p.setReadyForOrder(false);
-            playerRepository.save(p);
-        }
-
-        game.setCurrentWeek(currentWeek + 1);
-
-        if (game.getCurrentWeek() > GameConfig.GAME_WEEKS) {
-            game.setGameStatus(Game.GameStatus.FINISHED);
-            game.setFinishedAt(LocalDateTime.now());
-            game.setFestiveWeek(false); // Game is over
-        } else {
-            // Use your new helper to set the flag for the *new* current week
-            boolean isNextWeekFestive = GameConfig.isFestiveWeek(game.getCurrentWeek());
-            game.setFestiveWeek(isNextWeekFestive);
-            log.info("Game {} set festive status for week {} to: {}", gameId, game.getCurrentWeek(), isNextWeekFestive);
-        }
-
-        gameRepository.save(game);
-        log.info("Game {} advanced to week {}", gameId, game.getCurrentWeek());
-
-        // broadcast updated game state (or room state if part of a room)
-        if (game.getGameRoom() != null) {
-            // This logic is complex, but your `broadcastRoomState`
-            // should also be wrapped in a broadcastAfterCommit
-            GameRoom room = gameRoomRepository.findByIdWithAllData(game.getGameRoom().getId()).get();
-            broadcastRoomState(room.getId(), room); // This might have its own race condition
-        } else {
-            // This is the one that matters for your current bug
-            broadcastAfterCommit(gameId);
-        }
-    }
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Room-mode order placement
+    // ─────────────────────────────────────────────────────────────────────────
 
     /**
-     * Room mode: submit order for a room player
+     * Records a player's order in room mode.
+     *
+     * FIX: intermediate state is now broadcast post-commit (not mid-transaction).
      */
     public void submitRoomOrder(String roomId, String username, int orderAmount) {
+        // ── Validate ──────────────────────────────────────────────────────────
+        if (orderAmount < 0 || orderAmount > MAX_ORDER_AMOUNT) {
+            throw new IllegalArgumentException(
+                    "Order amount must be 0–" + MAX_ORDER_AMOUNT + ", got: " + orderAmount);
+        }
+
         GameRoom room = gameRoomRepository.findByIdWithAllData(roomId)
                 .orElseThrow(() -> new RuntimeException("Room not found: " + roomId));
 
         if (room.getStatus() != GameRoom.RoomStatus.RUNNING) {
-            throw new RuntimeException("This room is not running.");
+            throw new RuntimeException("Room " + roomId + " is not currently running.");
         }
 
         Players player = room.getTeams().stream()
                 .flatMap(team -> team.getPlayers().stream())
                 .filter(p -> p.getPlayerInfo().getUserName().equals(username))
                 .findFirst()
-                .orElseThrow(() -> new RuntimeException("Player not found in this room"));
+                .orElseThrow(() -> new RuntimeException("Player not found in room: " + username));
 
         if (player.isReadyForOrder()) {
             log.warn("Player {} already submitted order for room {}", username, roomId);
             return;
         }
 
-        player.setCurrentOrder(Math.max(0, orderAmount));
+        player.setCurrentOrder(orderAmount);
         player.setReadyForOrder(true);
         playerRepository.save(player);
-
-        // broadcast intermediate room state
-        broadcastRoomState(roomId, room);
 
         boolean allReady = room.getTeams().stream()
                 .flatMap(team -> team.getPlayers().stream())
                 .allMatch(Players::isReadyForOrder);
 
-        if (allReady) {
-            log.info("All players in room {} are ready. Advancing all games.", roomId);
-
-            List<Game> games = room.getGames();
-            CompletableFuture<Void> g1 = roomAdvancementService.advanceGame(games.get(0).getId());
-            CompletableFuture<Void> g2 = roomAdvancementService.advanceGame(games.get(1).getId());
-            CompletableFuture<Void> g3 = roomAdvancementService.advanceGame(games.get(2).getId());
-            CompletableFuture<Void> g4 = roomAdvancementService.advanceGame(games.get(3).getId());
-
-            CompletableFuture.allOf(g1, g2, g3, g4).thenRun(() -> {
-                log.info("All games in room {} advanced. Running post-turn cleanup.", roomId);
-                self.postAdvanceRoomTurn(roomId);
-            });
-        }
-    }
-
-    /**
-     * Post-advance cleanup for rooms (runs in a new transaction).
-     */
-    @Transactional
-    public void postAdvanceRoomTurn(String roomId) {
-        GameRoom room = gameRoomRepository.findByIdWithAllData(roomId)
-                .orElseThrow(() -> new RuntimeException("Room not found: " + roomId));
-
-        boolean allGamesFinished = room.getGames().stream()
-                .allMatch(g -> g.getGameStatus() == Game.GameStatus.FINISHED);
-
-        if (allGamesFinished) {
-            room.setStatus(GameRoom.RoomStatus.FINISHED);
-            room.setFinishedAt(LocalDateTime.now());
-            log.info("Room {} finished.", roomId);
+        if (!allReady) {
+            // FIX: was calling broadcastRoomState() mid-transaction (before commit).
+            // Now we wait until after commit so clients see consistent DB state.
+            broadcastService.broadcastRoomAfterCommit(roomId);
+            return;
         }
 
-        room.getTeams().stream()
-                .flatMap(team -> team.getPlayers().stream())
-                .forEach(player -> {
-                    player.setReadyForOrder(false);
-                    playerRepository.save(player);
-                });
+        log.info("All players in room {} ready. Advancing all games.", roomId);
 
-        gameRoomRepository.save(room);
-        broadcastRoomState(roomId, room);
+        List<Game> games = room.getGames();
+        CompletableFuture<Void> g1 = roomAdvancementService.advanceGame(games.get(0).getId());
+        CompletableFuture<Void> g2 = roomAdvancementService.advanceGame(games.get(1).getId());
+        CompletableFuture<Void> g3 = roomAdvancementService.advanceGame(games.get(2).getId());
+        CompletableFuture<Void> g4 = roomAdvancementService.advanceGame(games.get(3).getId());
+
+        CompletableFuture.allOf(g1, g2, g3, g4).thenRun(() -> {
+            log.info("All games in room {} advanced. Running post-turn cleanup.", roomId);
+            // turnService is a different bean → @Transactional works correctly here
+            turnService.postAdvanceRoomTurn(roomId);
+        });
     }
 
-    public void broadcastGameState(Game game) {
-        GameStateDTO newState = GameStateDTO.fromGame(game);
-        String channel = "game-updates:" + game.getId();
-        log.info("Publishing game state on Redis channel: {}", channel);
-        redisTemplate.convertAndSend(channel, newState);
-    }
-
-    public void broadcastGameState(String gameId) {
-        try {
-            Game fresh = gameRepository.findByIdWithPlayers(gameId)
-                    .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
-            broadcastGameState(fresh);
-        } catch (Exception e) {
-            log.error("Failed to broadcast game state for id {}: {}", gameId, e.getMessage(), e);
-        }
-    }
-
-    private void broadcastRoomState(String roomId, GameRoom room) {
-        RoomStateDTO roomState = RoomStateDTO.fromGameRoom(room);
-        String channel = "room-updates:" + roomId;
-        log.info("Broadcasting state for room {} to Redis channel: {}", roomId, channel);
-        redisTemplate.convertAndSend(channel, roomState);
-    }
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Queries
+    // ─────────────────────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
     public Map<String, List<GameTurnHistoryDTO>> getGameHistory(String gameId) {
-
-        // 1. Fast check if game exists
         if (!gameRepository.existsById(gameId)) {
             throw new RuntimeException("Game not found: " + gameId);
         }
 
-        // 2. ✅ THE FIX: Fetch ALL history for this game directly
-        // This avoids the "MultipleBagFetchException" completely.
+        // Single query for all turns — avoids MultipleBagFetchException
         List<GameTurn> allTurns = gameTurnRepository.findByPlayer_Game_Id(gameId);
 
-        // 3. Group the turns by Player Role
         Map<String, List<GameTurnHistoryDTO>> response = new HashMap<>();
-
         for (GameTurn turn : allTurns) {
-            // Safety check
-            if (turn.getPlayer() == null || turn.getPlayer().getRole() == null)
-                continue;
-
-            String roleKey = turn.getPlayer().getRole().toString(); // e.g., "DISTRIBUTOR"
-
-            // Initialize list if not exists
-            response.putIfAbsent(roleKey, new ArrayList<>());
-
-            // Add the converted DTO
-            response.get(roleKey).add(GameTurnHistoryDTO.fromEntity(turn));
+            if (turn.getPlayer() == null || turn.getPlayer().getRole() == null) continue;
+            String roleKey = turn.getPlayer().getRole().toString();
+            response.computeIfAbsent(roleKey, k -> new ArrayList<>())
+                    .add(GameTurnHistoryDTO.fromEntity(turn));
         }
 
-        // 4. Sort the lists by week number (Just to be clean)
-        for (List<GameTurnHistoryDTO> historyList : response.values()) {
-            historyList.sort(Comparator.comparingInt(GameTurnHistoryDTO::weekDay));
-        }
+        // Sort each role's history by ascending week number
+        response.values().forEach(list ->
+                list.sort(Comparator.comparingInt(GameTurnHistoryDTO::weekDay)));
 
-        log.info("Fetched history for game {}: found {} total turns.", gameId, allTurns.size());
-
+        log.info("Fetched history for game {}: {} total turns.", gameId, allTurns.size());
         return response;
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Public broadcast delegate (used by GameController response path)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /** Convenience passthrough so callers that already have a Game object don't
+     *  need to inject BroadcastService separately. */
+    public void broadcastGameState(Game game) {
+        broadcastService.broadcastGameState(game);
+    }
+
+    public void broadcastGameState(String gameId) {
+        broadcastService.broadcastGameState(gameId);
+    }
 }

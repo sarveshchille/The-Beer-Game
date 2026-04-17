@@ -1,81 +1,85 @@
 package com.beergame.backend.service;
 
-import java.time.LocalDateTime;
-import java.util.List;
-
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
 import com.beergame.backend.model.Game;
 import com.beergame.backend.model.GameRoom;
 import com.beergame.backend.repository.GameRepository;
 import com.beergame.backend.repository.GameRoomRepository;
-
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+import java.util.List;
+
+/**
+ * Periodically removes abandoned game sessions that were never filled.
+ *
+ * Without this, any game that is created but never gets 4 players stays in
+ * LOBBY status forever, and any room that never gets 16 players stays in
+ * WAITING status forever — both accumulate indefinitely in the database.
+ *
+ * Requires @EnableScheduling on BackendApplication (already present).
+ */
 @Service
+@RequiredArgsConstructor
 @Slf4j
 public class CleanUpService {
 
-    private final GameRepository gameRepository;
+    private final GameRepository     gameRepository;
     private final GameRoomRepository gameRoomRepository;
 
-    private final int FINISHED_GAMES_CLEANUP_DAYS;
-    private final int FINISHED_ROOMS_CLEANUP_DAYS;
+    /** Lobbies older than this are considered abandoned. */
+    private static final int LOBBY_EXPIRY_MINUTES = 30;
 
-    public CleanUpService(GameRepository gameRepository,
-            GameRoomRepository gameRoomRepository,
-            @Value("${app.cleanup.games.days}") int finishedGamesCleanupDays,
-            @Value("${app.cleanup.rooms.days}") int finishedRoomsCleanupDays) {
-        this.gameRepository = gameRepository;
-        this.gameRoomRepository = gameRoomRepository;
-        this.FINISHED_GAMES_CLEANUP_DAYS = finishedGamesCleanupDays;
-        this.FINISHED_ROOMS_CLEANUP_DAYS = finishedRoomsCleanupDays;
-    }
+    /** Waiting rooms older than this are considered abandoned. */
+    private static final int ROOM_EXPIRY_MINUTES  = 60;
 
-    @Scheduled(fixedRateString = "PT24H")
+    /**
+     * Runs every 15 minutes.
+     * Deletes LOBBY games that were created more than 30 minutes ago.
+     *
+     * CascadeType.ALL on Game.players means the orphaned Players rows are
+     * deleted automatically.
+     */
+    @Scheduled(fixedRate = 15 * 60 * 1000)
     @Transactional
-    public void cleanUpFinishedGames() {
-        log.info("Starting finished SINGLE games cleanup...");
+    public void expireStaleLobbyGames() {
+        LocalDateTime cutoff = LocalDateTime.now().minusMinutes(LOBBY_EXPIRY_MINUTES);
 
-        LocalDateTime expiryThreshold = LocalDateTime.now().minusDays(FINISHED_GAMES_CLEANUP_DAYS);
+        List<Game> staleLobbies = gameRepository
+        .findByGameStatusAndCreatedAtBefore(Game.GameStatus.LOBBY, cutoff);
 
-        List<Game> gamesToDelete = gameRepository.findByGameStatusAndCreatedAt(
-                Game.GameStatus.FINISHED,
-                expiryThreshold);
-
-        if (gamesToDelete.isEmpty()) {
-            log.info("No finished single games older than {} days to delete.", FINISHED_GAMES_CLEANUP_DAYS);
+        if (staleLobbies.isEmpty()) {
             return;
         }
 
-        log.info("Found {} finished single games to delete.", gamesToDelete.size());
-        gameRepository.deleteAll(gamesToDelete);
-        log.info("Cleanup of finished single games and their data is complete.");
+        log.info("Cleanup: deleting {} stale LOBBY game(s) older than {} minutes",
+                staleLobbies.size(), LOBBY_EXPIRY_MINUTES);
+
+        gameRepository.deleteAll(staleLobbies);
     }
 
-    @Scheduled(fixedRateString = "PT24H", initialDelayString = "PT1H")
+    /**
+     * Runs every 30 minutes.
+     * Deletes WAITING rooms that were created more than 60 minutes ago.
+     */
+    @Scheduled(fixedRate = 30 * 60 * 1000)
     @Transactional
-    public void cleanUpFinishedRooms() {
-        log.info("Starting finished ROOMS cleanup...");
+    public void expireStaleWaitingRooms() {
+        LocalDateTime cutoff = LocalDateTime.now().minusMinutes(ROOM_EXPIRY_MINUTES);
 
-        LocalDateTime expiryThreshold = LocalDateTime.now().minusDays(FINISHED_ROOMS_CLEANUP_DAYS);
+        List<GameRoom> staleRooms = gameRoomRepository
+                .findByStatusAndFinishedAtBefore(GameRoom.RoomStatus.WAITING, cutoff);
 
-        List<GameRoom> roomsToDelete = gameRoomRepository.findByStatusAndFinishedAtBefore(
-                GameRoom.RoomStatus.FINISHED,
-                expiryThreshold);
-
-        if (roomsToDelete.isEmpty()) {
-            log.info("No finished rooms older than {} days to delete.", FINISHED_ROOMS_CLEANUP_DAYS);
+        if (staleRooms.isEmpty()) {
             return;
         }
 
-        log.info("Found {} finished rooms to delete.", roomsToDelete.size());
+        log.info("Cleanup: deleting {} stale WAITING room(s) older than {} minutes",
+                staleRooms.size(), ROOM_EXPIRY_MINUTES);
 
-        gameRoomRepository.deleteAll(roomsToDelete);
-
-        log.info("Cleanup of finished rooms and all associated games/teams/players/turns is complete.");
+        gameRoomRepository.deleteAll(staleRooms);
     }
 }
