@@ -120,21 +120,20 @@ public class GameService {
     @Async
     @EventListener
     public void triggerBotsOnWeekStart(WeekStartedEvent event) {
-        // Ensure bots also respect the game lock
-        redisLockService.executeWithLock(event.getGameId(), 10, () -> {
-            Game game = gameRepository.findByIdWithPlayers(event.getGameId()).orElse(null);
-            if (game == null || game.getGameStatus() != Game.GameStatus.IN_PROGRESS)
-                return null;
+        // 1. Fetch game WITHOUT taking the lock
+        Game game = gameRepository.findByIdWithPlayers(event.getGameId()).orElse(null);
+        if (game == null || game.getGameStatus() != Game.GameStatus.IN_PROGRESS)
+            return;
 
-            game.getPlayers().stream()
-                    .filter(p -> p.isBot() && !p.isReadyForOrder())
-                    .forEach(bot -> {
-                        int order = botService.calculateOrder(game, bot);
-                        placeOrder(game.getId(), bot.getUserName(), order);
-                    });
+        // 2. Do the slow network calls to Python WITHOUT locking the game
+        game.getPlayers().stream()
+                .filter(p -> p.isBot() && !p.isReadyForOrder())
+                .forEach(bot -> {
+                    int order = botService.calculateOrder(game, bot); // Slow HTTP call
 
-            return null;
-        });
+                    // 3. placeOrder() handles its own lock internally. It's safe to call here.
+                    placeOrder(game.getId(), bot.getUserName(), order);
+                });
     }
 
     /**
@@ -284,6 +283,7 @@ public class GameService {
                 game.setGameStatus(Game.GameStatus.IN_PROGRESS);
                 gameRepository.save(game);
                 log.info("Game {} → IN_PROGRESS", gameId);
+                eventPublisher.publishEvent(new WeekStartedEvent(this, gameId, 1));
             }
 
             broadcastService.broadcastGameAfterCommit(gameId);
