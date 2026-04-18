@@ -24,6 +24,7 @@ import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
@@ -121,6 +122,7 @@ public class GameService {
 
     @Async
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void triggerBotsOnWeekStart(WeekStartedEvent event) {
         // 1. Fetch game WITHOUT taking the lock
         Game game = gameRepository.findByIdWithPlayers(event.getGameId()).orElse(null);
