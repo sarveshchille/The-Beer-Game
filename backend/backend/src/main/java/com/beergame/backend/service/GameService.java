@@ -2,6 +2,8 @@ package com.beergame.backend.service;
 
 import com.beergame.backend.config.GameConfig;
 import com.beergame.backend.dto.GameTurnHistoryDTO;
+import com.beergame.backend.event.AfkOrderRequestEvent;
+import com.beergame.backend.event.AllPlayersReadyEvent;
 import com.beergame.backend.model.BotType;
 import com.beergame.backend.model.Game;
 import com.beergame.backend.model.GameRoom;
@@ -15,6 +17,9 @@ import com.beergame.backend.repository.PlayerInfoRepository;
 import com.beergame.backend.repository.PlayerRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
+import org.springframework.context.event.EventListener;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -67,7 +72,7 @@ public class GameService {
     private final TurnService        turnService;
     private final BroadcastService   broadcastService;
     private final BotService botService;
-    private final AfkDetectionService afkDetectionService;
+    private final ApplicationEventPublisher eventPublisher;
 
     // ─────────────────────────────────────────────────────────────────────────
     //  Helpers
@@ -80,6 +85,13 @@ public class GameService {
         }
         return sb.toString();
     }
+
+    @EventListener
+public void onAfkOrderRequest(AfkOrderRequestEvent event) {
+    log.info("Processing AFK bot order for player {} in game {}",
+            event.getUsername(), event.getGameId());
+    placeOrder(event.getGameId(), event.getUsername(), event.getOrderAmount());
+}
 
     /**
      * Generates a unique 10-character game ID.
@@ -317,7 +329,8 @@ game.getPlayers().stream()
             log.info("All players ready for game {}. Advancing turn.", gameId);
             // advanceTurn joins this transaction and registers its own post-commit
             // broadcast — do NOT register another one here.
-            afkDetectionService.clearWeekTimer(gameId, game.getCurrentWeek());
+eventPublisher.publishEvent(
+    new AllPlayersReadyEvent(this, gameId, game.getCurrentWeek()));
             turnService.advanceTurn(gameId);
         } else {
             // Intermediate state: just let clients know this player is ready.

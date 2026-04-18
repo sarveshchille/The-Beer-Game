@@ -1,5 +1,7 @@
 package com.beergame.backend.service;
 
+import com.beergame.backend.event.AfkOrderRequestEvent;
+import com.beergame.backend.event.AllPlayersReadyEvent;
 import com.beergame.backend.event.WeekStartedEvent;
 import com.beergame.backend.model.BotType;
 import com.beergame.backend.model.Game;
@@ -8,6 +10,7 @@ import com.beergame.backend.repository.GameRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -32,12 +35,20 @@ import java.util.concurrent.TimeUnit;
 public class AfkDetectionService {
 
     private final GameRepository  gameRepository;
-    private final GameService gameService;
+    private final ApplicationEventPublisher    eventPublisher; 
     private final BotService botService;
     private final RedisTemplate<String, Object> redisTemplate;
 
     public static final int AFK_TIMEOUT_SECONDS = 60;
     private static final String AFK_KEY_PREFIX  = "afk:";
+
+
+    // Listens for AllPlayersReadyEvent — no longer needs GameService to clear timer
+    @EventListener
+    public void onAllPlayersReady(AllPlayersReadyEvent event) {
+        clearWeekTimer(event.getGameId(), event.getWeek());
+    }
+
 
     /**
      * Called by TurnService at the START of each new week.
@@ -95,7 +106,8 @@ public class AfkDetectionService {
                 // Temporarily treat them as EASY bot for this turn
                 afkPlayer.setBotType(BotType.EASY);
                 int order = botService.calculateOrder(game, afkPlayer);
-                gameService.placeOrder(game.getId(), afkPlayer.getUserName(), order);
+                eventPublisher.publishEvent(
+                    new AfkOrderRequestEvent(this, game.getId(), afkPlayer.getUserName(), order));
             }
         }
     }
