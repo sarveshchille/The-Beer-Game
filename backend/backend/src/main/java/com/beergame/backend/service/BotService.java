@@ -30,21 +30,26 @@ public int calculateOrder(Game game, Players botPlayer) {
     try {
         String endpoint = resolveEndpoint(botPlayer.getBotType());
 
-        int nextFestiveWeek = game.getFestiveWeeks().stream()
-                .filter(w -> w >= game.getCurrentWeek())
-                .mapToInt(Integer::intValue)
-                .min()
-                .orElse(0);
+int currentWeek = game.getCurrentWeek();
 
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("game_id",           game.getId());
-        payload.put("turn_number",        game.getCurrentWeek());
-        payload.put("role",               botPlayer.getRole().toString());
-        payload.put("consumer_demand",    botPlayer.getLastOrderReceived());
-        payload.put("current_inventory",  botPlayer.getInventory());
-        payload.put("current_backlog",    botPlayer.getBackOrder());
-        payload.put("incoming_shipments", botPlayer.getIncomingShipment());
-        payload.put("festive_week",       nextFestiveWeek);
+// Strictly greater than currentWeek — current week's festive status
+// is already reflected in inventory/backlog the bot can see.
+// 0 = no upcoming festive week (Python handles this as the no-panic sentinel)
+int nextFestiveWeek = game.getFestiveWeeks().stream()
+        .filter(w -> w > currentWeek)
+        .mapToInt(Integer::intValue)
+        .min()
+        .orElse(0);
+
+Map<String, Object> payload = new HashMap<>();
+payload.put("game_id",           game.getId());
+payload.put("turn_number",        currentWeek);
+payload.put("role",               botPlayer.getRole().toString());
+payload.put("consumer_demand",    botPlayer.getLastOrderReceived());
+payload.put("current_inventory",  botPlayer.getInventory());
+payload.put("current_backlog",    botPlayer.getBackOrder());
+payload.put("incoming_shipments", botPlayer.getIncomingShipment());
+payload.put("festive_week",       nextFestiveWeek);
 
         @SuppressWarnings("unchecked")
         Map<String, Object> response = restTemplate.postForObject(
