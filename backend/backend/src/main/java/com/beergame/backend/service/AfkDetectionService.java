@@ -104,8 +104,7 @@ public class AfkDetectionService {
 
             for (Players afkPlayer : afkPlayers) {
                 // Temporarily treat them as EASY bot for this turn
-                afkPlayer.setBotType(BotType.EASY);
-                int order = botService.calculateOrder(game, afkPlayer);
+                int order = botService.calculateOrder(game, afkPlayer, BotType.EASY);
                 eventPublisher.publishEvent(
                     new AfkOrderRequestEvent(this, game.getId(), afkPlayer.getUserName(), order));
             }

@@ -4,6 +4,7 @@ import com.beergame.backend.config.GameConfig;
 import com.beergame.backend.dto.GameTurnHistoryDTO;
 import com.beergame.backend.event.AfkOrderRequestEvent;
 import com.beergame.backend.event.AllPlayersReadyEvent;
+import com.beergame.backend.event.WeekStartedEvent;
 import com.beergame.backend.model.BotType;
 import com.beergame.backend.model.Game;
 import com.beergame.backend.model.GameRoom;
@@ -19,9 +20,13 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.context.event.EventListener;
+import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.retry.annotation.Retryable;
+import org.springframework.retry.annotation.Backoff;
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
@@ -86,7 +91,13 @@ public class GameService {
         return sb.toString();
     }
 
-    @EventListener
+@Async
+@EventListener
+@Retryable(
+    retryFor = OptimisticLockingFailureException.class, 
+    maxAttempts = 3, 
+    backoff = @Backoff(delay = 100, maxDelay = 500)
+)
 public void onAfkOrderRequest(AfkOrderRequestEvent event) {
     log.info("Processing AFK bot order for player {} in game {}",
             event.getUsername(), event.getGameId());
@@ -109,6 +120,25 @@ public void onAfkOrderRequest(AfkOrderRequestEvent event) {
         throw new RuntimeException(
                 "Failed to generate a unique game ID after " + MAX_ID_RETRIES + " attempts");
     }
+
+@Async
+@EventListener
+public void triggerBotsOnWeekStart(WeekStartedEvent event) {
+    // Ensure bots also respect the game lock
+    redisLockService.executeWithLock(event.getGameId(), 10, () -> {
+        Game game = gameRepository.findByIdWithPlayers(event.getGameId()).orElse(null);
+        if (game == null || game.getGameStatus() != Game.GameStatus.IN_PROGRESS) return null;
+
+        game.getPlayers().stream()
+            .filter(p -> p.isBot() && !p.isReadyForOrder())
+            .forEach(bot -> {
+                int order = botService.calculateOrder(game, bot);
+                placeOrder(game.getId(), bot.getUserName(), order); 
+            });
+            
+        return null;
+    });
+}
 
     /**
  * Adds a bot player to fill an empty role slot.
@@ -284,8 +314,10 @@ public Game addBot(String gameId, Players.RoleType role, BotType botType) {
      * advanceTurn's queries run, so the allReady check inside advanceTurn sees
      * consistent data.
      */
-    public void placeOrder(String gameId, String username, int orderAmount) {
-        // ── Validate ──────────────────────────────────────────────────────────
+ public void placeOrder(String gameId, String username, int orderAmount) {
+    // 1. Wrap the entire order processing in the distributed lock
+    redisLockService.executeWithLock(gameId, 10, () -> {
+        
         if (orderAmount < 0 || orderAmount > MAX_ORDER_AMOUNT) {
             throw new IllegalArgumentException(
                     "Order amount must be 0–" + MAX_ORDER_AMOUNT + ", got: " + orderAmount);
@@ -299,44 +331,35 @@ public Game addBot(String gameId, Players.RoleType role, BotType botType) {
 
         if (player.isReadyForOrder()) {
             log.warn("Player {} already submitted an order for week {}", username, game.getCurrentWeek());
-            return;
+            return null; // Must return null for the lambda
         }
 
-        // 'player' is a Hibernate managed entity. Mutating it here is immediately
-        // visible to game.getPlayers() (same session identity map), so the
-        // allReady check below is accurate without a re-fetch.
         player.setCurrentOrder(orderAmount);
         player.setReadyForOrder(true);
         playerRepository.save(player);
-
-game.getPlayers().stream()
-    .filter(p -> p.isBot() && !p.isReadyForOrder())
-    .forEach(bot -> {
-        int order = botService.calculateOrder(game, bot);
-        placeOrder(game.getId(), bot.getUserName(), order);
-    });
 
         log.info("Player {} placed order {} for week {}", username, orderAmount, game.getCurrentWeek());
 
         if (game.getPlayers() == null || game.getPlayers().size() < 4) {
             broadcastService.broadcastGameAfterCommit(gameId);
-            return;
+            return null;
         }
 
         boolean allReady = game.getPlayers().stream().allMatch(Players::isReadyForOrder);
 
         if (allReady) {
             log.info("All players ready for game {}. Advancing turn.", gameId);
-            // advanceTurn joins this transaction and registers its own post-commit
-            // broadcast — do NOT register another one here.
-eventPublisher.publishEvent(
-    new AllPlayersReadyEvent(this, gameId, game.getCurrentWeek()));
+            eventPublisher.publishEvent(
+                new AllPlayersReadyEvent(this, gameId, game.getCurrentWeek()));
             turnService.advanceTurn(gameId);
         } else {
-            // Intermediate state: just let clients know this player is ready.
             broadcastService.broadcastGameAfterCommit(gameId);
         }
+        return null; 
+    });
     }
+
+
 
     // ─────────────────────────────────────────────────────────────────────────
     //  Room-mode order placement
