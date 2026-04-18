@@ -25,6 +25,8 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.retry.annotation.Retryable;
 import org.springframework.retry.annotation.Backoff;
 
@@ -118,7 +120,7 @@ public class GameService {
     }
 
     @Async
-    @EventListener
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void triggerBotsOnWeekStart(WeekStartedEvent event) {
         // 1. Fetch game WITHOUT taking the lock
         Game game = gameRepository.findByIdWithPlayers(event.getGameId()).orElse(null);
