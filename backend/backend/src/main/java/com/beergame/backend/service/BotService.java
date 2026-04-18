@@ -41,15 +41,26 @@ int nextFestiveWeek = game.getFestiveWeeks().stream()
         .min()
         .orElse(0);
 
+// Inside BotService.java -> calculateOrder()
+
 Map<String, Object> payload = new HashMap<>();
 payload.put("game_id",           game.getId());
-payload.put("turn_number",        currentWeek);
-payload.put("role",               botPlayer.getRole().toString());
-payload.put("consumer_demand",    botPlayer.getLastOrderReceived());
-payload.put("current_inventory",  botPlayer.getInventory());
-payload.put("current_backlog",    botPlayer.getBackOrder());
-payload.put("incoming_shipments", botPlayer.getIncomingShipment());
-payload.put("festive_week",       nextFestiveWeek);
+payload.put("role",              botPlayer.getRole().toString());
+payload.put("week",              currentWeek); // Changed to match pandas
+payload.put("festive_week",      nextFestiveWeek);
+
+// Base state variables (matching features.py expectations)
+payload.put("last_order_received", botPlayer.getLastOrderReceived());
+payload.put("inventory",           botPlayer.getInventory());
+payload.put("back_order",          botPlayer.getBackOrder());
+payload.put("incoming_shipment",   botPlayer.getIncomingShipment());
+
+// Pipeline & Cost variables needed for the feature engineer
+payload.put("order_arriving_next_week",          botPlayer.getOrderArrivingNextWeek());
+payload.put("shipment_arriving_week_after_next", botPlayer.getShipmentArrivingWeekAfterNext());
+payload.put("last_shipment_received",            botPlayer.getLastShipmentReceived());
+payload.put("outgoing_delivery",                 botPlayer.getOutgoingDelivery());
+payload.put("weekly_cost",                       botPlayer.getWeeklyCost());
 
         @SuppressWarnings("unchecked")
         Map<String, Object> response = restTemplate.postForObject(
