@@ -1,11 +1,14 @@
 package com.beergame.backend.service;
 
+import com.beergame.backend.event.WeekStartedEvent;
 import com.beergame.backend.model.BotType;
 import com.beergame.backend.model.Game;
 import com.beergame.backend.model.Players;
 import com.beergame.backend.repository.GameRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
+import org.springframework.context.event.EventListener;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -29,7 +32,8 @@ import java.util.concurrent.TimeUnit;
 public class AfkDetectionService {
 
     private final GameRepository  gameRepository;
-    private final BotService      botService;
+    private final GameService gameService;
+    private final BotService botService;
     private final RedisTemplate<String, Object> redisTemplate;
 
     public static final int AFK_TIMEOUT_SECONDS = 60;
@@ -53,11 +57,20 @@ public class AfkDetectionService {
         redisTemplate.delete(AFK_KEY_PREFIX + gameId + ":" + week);
     }
 
+    @EventListener
+   public void onWeekStarted(WeekStartedEvent event) {
+    String key = AFK_KEY_PREFIX + event.getGameId() + ":" + event.getWeek();
+    redisTemplate.opsForValue()
+        .set(key, "active", AFK_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+    log.info("AFK timer started for game {} week {}", event.getGameId(), event.getWeek());
+   }
+
+
     /**
      * Every 10 seconds: find IN_PROGRESS games whose AFK timer has expired
      * and submit bot orders for any players who haven't ordered yet.
      */
-    @Scheduled(fixedRate = 10_000)
+    @Scheduled(fixedRate = 40_000)
     public void checkAfkPlayers() {
         List<Game> activeGames = gameRepository
                 .findByGameStatus(Game.GameStatus.IN_PROGRESS);
@@ -81,7 +94,8 @@ public class AfkDetectionService {
             for (Players afkPlayer : afkPlayers) {
                 // Temporarily treat them as EASY bot for this turn
                 afkPlayer.setBotType(BotType.EASY);
-                botService.submitBotOrder(game, afkPlayer);
+                int order = botService.calculateOrder(game, afkPlayer);
+                gameService.placeOrder(game.getId(), afkPlayer.getUserName(), order);
             }
         }
     }

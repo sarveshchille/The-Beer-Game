@@ -297,9 +297,12 @@ public Game addBot(String gameId, Players.RoleType role, BotType botType) {
         player.setReadyForOrder(true);
         playerRepository.save(player);
 
-        game.getPlayers().stream()
+game.getPlayers().stream()
     .filter(p -> p.isBot() && !p.isReadyForOrder())
-    .forEach(bot -> botService.submitBotOrder(game, bot));
+    .forEach(bot -> {
+        int order = botService.calculateOrder(game, bot);
+        placeOrder(game.getId(), bot.getUserName(), order);
+    });
 
         log.info("Player {} placed order {} for week {}", username, orderAmount, game.getCurrentWeek());
 

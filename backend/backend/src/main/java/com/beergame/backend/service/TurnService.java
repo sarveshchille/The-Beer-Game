@@ -1,10 +1,13 @@
 package com.beergame.backend.service;
 
 import com.beergame.backend.config.GameConfig;
+import com.beergame.backend.event.WeekStartedEvent;
 import com.beergame.backend.model.*;
 import com.beergame.backend.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,7 +36,7 @@ public class TurnService {
     private final GameTurnRepository gameTurnRepository;
     private final GameRoomRepository gameRoomRepository;
     private final BroadcastService   broadcastService;
-    private final AfkDetectionService afkDetectionService;
+    private final ApplicationEventPublisher eventPublisher;
 
     /**
      * Advances one game by one week.
@@ -161,9 +164,10 @@ public class TurnService {
 
         gameRepository.save(game);
 
-        if (game.getGameStatus() == Game.GameStatus.IN_PROGRESS) {
-    afkDetectionService.registerWeekStart(gameId, game.getCurrentWeek());
-}
+         if (game.getGameStatus() == Game.GameStatus.IN_PROGRESS) {
+              eventPublisher.publishEvent(
+            new WeekStartedEvent(this, gameId, game.getCurrentWeek()));
+        }
 
         // Broadcast AFTER this transaction commits so clients always see
         // consistent, fully-written state.
