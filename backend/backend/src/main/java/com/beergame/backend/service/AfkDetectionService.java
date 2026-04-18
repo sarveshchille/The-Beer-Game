@@ -77,16 +77,23 @@ public class AfkDetectionService {
    }
 
 
-    /**
+ /**
      * Every 10 seconds: find IN_PROGRESS games whose AFK timer has expired
      * and submit bot orders for any players who haven't ordered yet.
      */
     @Scheduled(fixedRate = 40_000)
     public void checkAfkPlayers() {
+        // FIX 1: Use the JOIN FETCH repository method
         List<Game> activeGames = gameRepository
-                .findByGameStatus(Game.GameStatus.IN_PROGRESS);
+                .findActiveGamesWithPlayers(Game.GameStatus.IN_PROGRESS);
 
         for (Game game : activeGames) {
+            // FIX 2: Check if we've already processed AFK orders for this specific week
+            String processedKey = "afk_processed:" + game.getId() + ":" + game.getCurrentWeek();
+            if (Boolean.TRUE.equals(redisTemplate.hasKey(processedKey))) {
+                continue; // Async events are already handling this week
+            }
+
             String key = AFK_KEY_PREFIX + game.getId() + ":" + game.getCurrentWeek();
             Boolean exists = redisTemplate.hasKey(key);
 
@@ -103,11 +110,14 @@ public class AfkDetectionService {
                     game.getId(), game.getCurrentWeek(), afkPlayers.size());
 
             for (Players afkPlayer : afkPlayers) {
-                // Temporarily treat them as EASY bot for this turn
+                // FIX 3: Pass BotType.EASY directly to calculateOrder instead of mutating the entity
                 int order = botService.calculateOrder(game, afkPlayer, BotType.EASY);
                 eventPublisher.publishEvent(
                     new AfkOrderRequestEvent(this, game.getId(), afkPlayer.getUserName(), order));
             }
+            
+            // Lock this week so the next 40s cron tick ignores it while the async events resolve
+            redisTemplate.opsForValue().set(processedKey, "true", 7, TimeUnit.DAYS); 
         }
     }
 }

@@ -3,6 +3,7 @@ package com.beergame.backend.repository;
 import com.beergame.backend.model.Game;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -40,4 +41,7 @@ public interface GameRepository extends JpaRepository<Game, String> {
             """)
     Optional<Game> findByIdWithPlayersAndTurnHistory(String id);
     List<Game> findByGameStatus(Game.GameStatus status);
+
+    @Query("SELECT distinct g FROM Game g LEFT JOIN FETCH g.players WHERE g.gameStatus = :status")
+List<Game> findActiveGamesWithPlayers(@Param("status") Game.GameStatus status);
 }
