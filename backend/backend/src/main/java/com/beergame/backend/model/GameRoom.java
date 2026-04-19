@@ -30,7 +30,7 @@ public class GameRoom {
     @Column(name = "status", nullable = false)
     private RoomStatus status;
 
-    @Column(name = "createdAt", nullable = false)
+    @Column(name = "createdAt")
     private LocalDateTime createdAt;
 
     @OneToMany(mappedBy = "gameRoom", cascade = CascadeType.ALL, fetch = FetchType.LAZY)

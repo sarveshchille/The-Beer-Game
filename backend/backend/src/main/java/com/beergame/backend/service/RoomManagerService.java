@@ -70,7 +70,7 @@ public class RoomManagerService {
         GameRoom room = new GameRoom();
         room.setId(generateUniqueRoomId());
         room.setStatus(GameRoom.RoomStatus.WAITING);
-        room.setCreatedAt(java.time.LocalDateTime.now()); // BUG 5 FIX: needed for cleanup query
+        room.setCreatedAt(java.time.LocalDateTime.now());
         GameRoom saved = gameRoomRepository.save(room);
         log.info("Created GameRoom id={}", saved.getId());
         return saved;
