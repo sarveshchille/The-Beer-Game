@@ -1,6 +1,7 @@
 package com.beergame.backend.service;
 
 import com.beergame.backend.config.GameConfig;
+import com.beergame.backend.dto.RoomStateDTO;
 import com.beergame.backend.event.WeekStartedEvent;
 import com.beergame.backend.model.*;
 import com.beergame.backend.repository.*;
@@ -154,7 +155,7 @@ public class RoomManagerService {
             // Broadcast the in-memory manipulated room directly.
             // This is safer since executeWithLock might not be wrapped in a Spring @Transactional
             // boundary, causing AFTER_COMMIT hooks to fail or db queries to read stale data.
-            broadcastService.broadcastRoomState(roomId, RoomStateDTO.fromGameRoom(room));
+            broadcastService.broadcastRoomState(roomId, room);
 
             if (isRoomFull(room)) {
                 startGame(room);
@@ -242,7 +243,7 @@ public class RoomManagerService {
         log.info("Room {} started successfully", room.getId());
 
         // Immediately broadcast RUNNING state directly from memory to bypass transactional race conditions
-        broadcastService.broadcastRoomState(room.getId(), RoomStateDTO.fromGameRoom(room));
+        broadcastService.broadcastRoomState(room.getId(), room);
         // Publish WeekStartedEvent for each game AFTER commit so the AFK timer
         // is correctly armed. Without this the AFK scheduler sees no Redis key
         // and immediately treats all 16 players as AFK on its first 40s tick.
