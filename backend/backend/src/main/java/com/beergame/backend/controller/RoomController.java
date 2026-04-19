@@ -1,6 +1,7 @@
 package com.beergame.backend.controller;
 
 import com.beergame.backend.dto.JoinRoomRequestDTO;
+import com.beergame.backend.dto.RoomStateDTO;
 import com.beergame.backend.model.GameRoom;
 import com.beergame.backend.model.Players;
 import com.beergame.backend.service.RoomManagerService;
@@ -19,13 +20,14 @@ public class RoomController {
     private final RoomManagerService roomManagerService;
 
     @PostMapping("/create")
-    public ResponseEntity<GameRoom> createRoom() {
+    public ResponseEntity<RoomStateDTO> createRoom() {
         GameRoom newRoom = roomManagerService.createRoom();
-        return ResponseEntity.ok(newRoom);
+        // BUG 8 FIX: return DTO instead of raw entity to avoid LazyInitializationException
+        return ResponseEntity.ok(RoomStateDTO.fromGameRoom(newRoom));
     }
 
     @PostMapping("/{roomId}/join")
-    public ResponseEntity<GameRoom> joinRoom(@PathVariable String roomId,
+    public ResponseEntity<RoomStateDTO> joinRoom(@PathVariable String roomId,
             @Validated @RequestBody JoinRoomRequestDTO request,
             @AuthenticationPrincipal UserDetails userDetails) {
 
@@ -34,6 +36,7 @@ public class RoomController {
                 request.teamName(),
                 Players.RoleType.valueOf(request.role().toUpperCase()),
                 userDetails.getUsername());
-        return ResponseEntity.ok(room);
+        // BUG 8 FIX: return DTO instead of raw entity to avoid LazyInitializationException
+        return ResponseEntity.ok(RoomStateDTO.fromGameRoom(room));
     }
 }

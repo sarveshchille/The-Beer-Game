@@ -16,5 +16,10 @@ public interface GameRoomRepository extends JpaRepository<GameRoom, String> {
            "LEFT JOIN FETCH r.games g " +
            "WHERE r.id = :roomId")
     Optional<GameRoom> findByIdWithAllData(String roomId);
+
+    /** Used by CleanUpService to remove stale WAITING rooms that never filled up. */
+    List<GameRoom> findByStatusAndCreatedAtBefore(GameRoom.RoomStatus status, LocalDateTime cutoff);
+
+    /** Kept for backward compat with any callers checking FINISHED rooms by finishedAt. */
     List<GameRoom> findByStatusAndFinishedAtBefore(GameRoom.RoomStatus status, LocalDateTime expiryThreshold);
 }

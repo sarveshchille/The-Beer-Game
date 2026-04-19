@@ -70,6 +70,7 @@ public class RoomManagerService {
         GameRoom room = new GameRoom();
         room.setId(generateUniqueRoomId());
         room.setStatus(GameRoom.RoomStatus.WAITING);
+        room.setCreatedAt(java.time.LocalDateTime.now()); // BUG 5 FIX: needed for cleanup query
         GameRoom saved = gameRoomRepository.save(room);
         log.info("Created GameRoom id={}", saved.getId());
         return saved;
@@ -193,7 +194,12 @@ public class RoomManagerService {
                 Players.RoleType.MANUFACTURER
         };
 
-        List<Team> teams = room.getTeams();
+        // BUG 6 FIX: sort teams by teamName to make shuffle order deterministic.
+        // JPA does not guarantee order from JOIN FETCH — without this, the
+        // role-rotation formula (i+j)%4 produces inconsistent results across runs.
+        List<Team> teams = room.getTeams().stream()
+                .sorted(java.util.Comparator.comparing(Team::getTeamName))
+                .collect(java.util.stream.Collectors.toList());
         for (int i = 0; i < 4; i++) {
             Game currentGame = newGames.get(i);
             for (int j = 0; j < 4; j++) {

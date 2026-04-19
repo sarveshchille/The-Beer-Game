@@ -30,6 +30,9 @@ public class GameRoom {
     @Column(name = "status", nullable = false)
     private RoomStatus status;
 
+    @Column(name = "createdAt", nullable = false)
+    private LocalDateTime createdAt;
+
     @OneToMany(mappedBy = "gameRoom", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     @EqualsAndHashCode.Exclude
     @ToString.Exclude

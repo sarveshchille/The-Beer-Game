@@ -52,16 +52,6 @@ public class AfkDetectionService {
 
 
     /**
-     * Called by TurnService at the START of each new week.
-     * Registers the AFK deadline for this game + week.
-     */
-    public void registerWeekStart(String gameId, int week) {
-        String key = AFK_KEY_PREFIX + gameId + ":" + week;
-        redisTemplate.opsForValue().set(key, "active", AFK_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-        log.info("AFK timer started for game {} week {} ({}s)", gameId, week, AFK_TIMEOUT_SECONDS);
-    }
-
-    /**
      * Called when all players submit in time.
      * Clears the AFK key early so the scheduler doesn't fire unnecessarily.
      */
@@ -69,13 +59,13 @@ public class AfkDetectionService {
         redisTemplate.delete(AFK_KEY_PREFIX + gameId + ":" + week);
     }
 
-@TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-   public void onWeekStarted(WeekStartedEvent event) {
-    String key = AFK_KEY_PREFIX + event.getGameId() + ":" + event.getWeek();
-    redisTemplate.opsForValue()
-        .set(key, "active", AFK_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-    log.info("AFK timer started for game {} week {}", event.getGameId(), event.getWeek());
-   }
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void onWeekStarted(WeekStartedEvent event) {
+        String key = AFK_KEY_PREFIX + event.getGameId() + ":" + event.getWeek();
+        redisTemplate.opsForValue()
+            .set(key, "active", AFK_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        log.info("AFK timer started for game {} week {}", event.getGameId(), event.getWeek());
+    }
 
 
  /**

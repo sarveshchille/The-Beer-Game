@@ -71,7 +71,8 @@ public class CleanUpService {
         LocalDateTime cutoff = LocalDateTime.now().minusMinutes(ROOM_EXPIRY_MINUTES);
 
         List<GameRoom> staleRooms = gameRoomRepository
-                .findByStatusAndFinishedAtBefore(GameRoom.RoomStatus.WAITING, cutoff);
+                // BUG 5 FIX: WAITING rooms have finishedAt=null — must query by createdAt instead
+                .findByStatusAndCreatedAtBefore(GameRoom.RoomStatus.WAITING, cutoff);
 
         if (staleRooms.isEmpty()) {
             return;

@@ -341,7 +341,7 @@ public class GameService {
                 }
 
                 Players player = room.getTeams().stream()
-                        .flatMap(team -> team.getPlayers().stream())
+                        .flatMap(team -> team.getPlayers() != null ? team.getPlayers().stream() : java.util.stream.Stream.empty())
                         .filter(p -> p.getPlayerInfo().getUserName().equals(username))
                         .findFirst()
                         .orElseThrow(() -> new RuntimeException("Player not found in room: " + username));
