@@ -20,74 +20,89 @@ public class BotService {
     private final RestTemplate restTemplate;
 
     @Value("${bot.service.url}")
-    private String botServiceUrl; // e.g. http://localhost:8001
+    private String botServiceUrl;
 
-    /**
-     * Builds the game state payload, calls the correct FastAPI endpoint
-     * based on bot type, and submits the returned order via GameService.
-     */
-// Keep this for standard bots
+    private static final int MAX_RETRIES = 3;
+    private static final long RETRY_DELAY_MS = 5_000; // 5s between retries
+
     public int calculateOrder(Game game, Players botPlayer) {
         return calculateOrder(game, botPlayer, botPlayer.getBotType());
     }
 
-    // Use this for the AFK service
     public int calculateOrder(Game game, Players botPlayer, BotType activeBotType) {
-        try {
-            // FIX: Use activeBotType, not the entity's getBotType()
-            String endpoint = resolveEndpoint(activeBotType); 
+        String endpoint = resolveEndpoint(activeBotType);
+        Map<String, Object> payload = buildPayload(game, botPlayer);
 
-            int currentWeek = game.getCurrentWeek();
+        for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> response = restTemplate.postForObject(
+                        botServiceUrl + endpoint, payload, Map.class);
 
-            int nextFestiveWeek = game.getFestiveWeeks().stream()
-                    .filter(w -> w > currentWeek)
-                    .mapToInt(Integer::intValue)
-                    .min()
-                    .orElse(0);
+                if (response == null || !response.containsKey("predicted_order")) {
+                    log.error("Invalid bot response for game {} (attempt {})", game.getId(), attempt);
+                    continue; // retry
+                }
 
-            Map<String, Object> payload = new HashMap<>();
-            payload.put("game_id",           game.getId());
-            payload.put("role",              botPlayer.getRole().toString());
-            payload.put("week",              currentWeek);
-            payload.put("festive_week",      nextFestiveWeek);
+                int order = ((Number) response.get("predicted_order")).intValue();
+                log.info("Bot {} calculated order {} for game {} week {} (attempt {})",
+                        botPlayer.getUserName(), order, game.getId(), game.getCurrentWeek(), attempt);
+                return order;
 
-            payload.put("last_order_received", botPlayer.getLastOrderReceived());
-            payload.put("inventory",           botPlayer.getInventory());
-            payload.put("back_order",          botPlayer.getBackOrder());
-            payload.put("incoming_shipment",   botPlayer.getIncomingShipment());
+            } catch (Exception e) {
+                log.warn("Bot call failed for player {} in game {} (attempt {}/{}): {}",
+                        botPlayer.getUserName(), game.getId(), attempt, MAX_RETRIES, e.getMessage());
 
-            payload.put("order_arriving_next_week",          botPlayer.getOrderArrivingNextWeek());
-            payload.put("shipment_arriving_week_after_next", botPlayer.getShipmentArrivingWeekAfterNext());
-            payload.put("last_shipment_received",            botPlayer.getLastShipmentReceived());
-            payload.put("outgoing_delivery",                 botPlayer.getOutgoingDelivery());
-            payload.put("weekly_cost",                       botPlayer.getWeeklyCost());
-
-            @SuppressWarnings("unchecked")
-            Map<String, Object> response = restTemplate.postForObject(
-                    botServiceUrl + endpoint, payload, Map.class);
-
-            if (response == null || !response.containsKey("predicted_order")) {
-                log.error("Invalid bot response for game {}", game.getId());
-                return 0;
+                if (attempt < MAX_RETRIES) {
+                    try {
+                        Thread.sleep(RETRY_DELAY_MS);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
             }
-
-            int order = ((Number) response.get("predicted_order")).intValue();
-            log.info("Bot {} calculated order {} for game {} week {}",
-                    botPlayer.getUserName(), order, game.getId(), game.getCurrentWeek());
-            return order;
-
-        } catch (Exception e) {
-            log.error("Bot calculation failed for player {} in game {}: {}",
-                    botPlayer.getUserName(), game.getId(), e.getMessage(), e);
-            return 0; 
         }
+
+        log.error("All {} attempts failed for player {} in game {}. Defaulting to order 0.",
+                MAX_RETRIES, botPlayer.getUserName(), game.getId());
+        return 0;
+    }
+
+    private Map<String, Object> buildPayload(Game game, Players botPlayer) {
+        int currentWeek = game.getCurrentWeek();
+
+        int nextFestiveWeek = game.getFestiveWeeks().stream()
+                .filter(w -> w > currentWeek)
+                .mapToInt(Integer::intValue)
+                .min()
+                .orElse(0);
+
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("game_id", game.getId());
+        payload.put("role", botPlayer.getRole().toString());
+        payload.put("week", currentWeek);
+        payload.put("festive_week", nextFestiveWeek);
+
+        payload.put("last_order_received", botPlayer.getLastOrderReceived());
+        payload.put("inventory", botPlayer.getInventory());
+        payload.put("back_order", botPlayer.getBackOrder());
+        payload.put("incoming_shipment", botPlayer.getIncomingShipment());
+
+        payload.put("order_arriving_next_week", botPlayer.getOrderArrivingNextWeek());
+        payload.put("shipment_arriving_week_after_next", botPlayer.getShipmentArrivingWeekAfterNext());
+        payload.put("last_shipment_received", botPlayer.getLastShipmentReceived());
+        payload.put("outgoing_delivery", botPlayer.getOutgoingDelivery());
+        payload.put("weekly_cost", botPlayer.getWeeklyCost());
+
+        return payload;
     }
 
     private String resolveEndpoint(BotType botType) {
         return switch (botType) {
-            case EASY   -> "/easy_bot/predict_order";
+            case EASY -> "/easy_bot/predict_order";
             case MEDIUM -> "/medium_bot/predict_order";
-            case HARD   -> "/hard_bot/predict_order";
+            case HARD -> "/hard_bot/predict_order";
         };
     }
 }
