@@ -368,16 +368,22 @@ public class GameService {
 
                 log.info("All players in room {} ready. Advancing all games.", roomId);
 
-                List<Game> games = new ArrayList<>(room.getGames());
-                CompletableFuture<Void> g1 = roomAdvancementService.advanceGame(games.get(0).getId());
-                CompletableFuture<Void> g2 = roomAdvancementService.advanceGame(games.get(1).getId());
-                CompletableFuture<Void> g3 = roomAdvancementService.advanceGame(games.get(2).getId());
-                CompletableFuture<Void> g4 = roomAdvancementService.advanceGame(games.get(3).getId());
+                List<String> gameIds = room.getGames().stream().map(Game::getId).toList();
+                
+                org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(new org.springframework.transaction.support.TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        CompletableFuture<Void> g1 = roomAdvancementService.advanceGame(gameIds.get(0));
+                        CompletableFuture<Void> g2 = roomAdvancementService.advanceGame(gameIds.get(1));
+                        CompletableFuture<Void> g3 = roomAdvancementService.advanceGame(gameIds.get(2));
+                        CompletableFuture<Void> g4 = roomAdvancementService.advanceGame(gameIds.get(3));
 
-                CompletableFuture.allOf(g1, g2, g3, g4).thenRun(() -> {
-                    log.info("All games in room {} advanced. Running post-turn cleanup.", roomId);
-                    // turnService is a different bean → @Transactional works correctly here
-                    turnService.postAdvanceRoomTurn(roomId);
+                        CompletableFuture.allOf(g1, g2, g3, g4).thenRun(() -> {
+                            log.info("All games in room {} advanced. Running post-turn cleanup.", roomId);
+                            // turnService is a different bean → @Transactional works correctly here
+                            turnService.postAdvanceRoomTurn(roomId);
+                        });
+                    }
                 });
                 return null;
             });

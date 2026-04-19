@@ -34,6 +34,7 @@ public class RoomManagerService {
     private final PlayerInfoRepository playerInfoRepository;
     private final GameRepository       gameRepository;
     private final BroadcastService     broadcastService;
+    private final RedisLockService     redisLockService;
 
     private static final String        ALPHANUMERIC = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     private static final SecureRandom  RANDOM       = new SecureRandom();
@@ -74,63 +75,67 @@ public class RoomManagerService {
         return saved;
     }
 
-    public GameRoom joinRoom(String roomId, String teamName, Players.RoleType role, String username) {
-        GameRoom room = gameRoomRepository.findByIdWithAllData(roomId)
-                .orElseThrow(() -> new RuntimeException("Room not found: " + roomId));
+    public GameRoom joinRoom(String roomIdRaw, String teamName, Players.RoleType role, String username) {
+        if (roomIdRaw == null) throw new RuntimeException("roomId is null");
+        String roomId = roomIdRaw.trim();
+        return redisLockService.executeWithLock(roomId, 10, () -> {
+            GameRoom room = gameRoomRepository.findByIdWithAllData(roomId)
+                    .orElseThrow(() -> new RuntimeException("Room not found: " + roomId));
 
-        if (room.getStatus() != GameRoom.RoomStatus.WAITING) {
-            throw new RuntimeException("Room " + roomId + " is already running or finished");
-        }
+            if (room.getStatus() != GameRoom.RoomStatus.WAITING) {
+                throw new RuntimeException("Room " + roomId + " is already running or finished");
+            }
 
-        PlayerInfo playerInfo = playerInfoRepository.findByUserName(username)
-                .orElseThrow(() -> new RuntimeException("User not found: " + username));
+            PlayerInfo playerInfo = playerInfoRepository.findByUserName(username)
+                    .orElseThrow(() -> new RuntimeException("User not found: " + username));
 
-        Team team = teamRepository.findByGameRoomAndTeamName(room, teamName)
-                .orElseGet(() -> {
-                    if (room.getTeams() != null && room.getTeams().size() >= 4) {
-                        throw new RuntimeException("Room is full (4 teams already exist)");
-                    }
-                    Team newTeam = new Team();
-                    newTeam.setTeamName(teamName);
-                    newTeam.setGameRoom(room);
-                    return teamRepository.save(newTeam);
-                });
+            Team team = teamRepository.findByGameRoomAndTeamName(room, teamName)
+                    .orElseGet(() -> {
+                        if (room.getTeams() != null && room.getTeams().size() >= 4) {
+                            throw new RuntimeException("Room is full (4 teams already exist)");
+                        }
+                        Team newTeam = new Team();
+                        newTeam.setTeamName(teamName);
+                        newTeam.setGameRoom(room);
+                        return teamRepository.save(newTeam);
+                    });
 
-        boolean roleTaken = team.getPlayers() != null && team.getPlayers().stream()
-                .anyMatch(p -> p.getRole() == role);
-        if (roleTaken) {
-            throw new RuntimeException("Role " + role + " already taken on team " + teamName);
-        }
+            boolean roleTaken = team.getPlayers() != null && team.getPlayers().stream()
+                    .anyMatch(p -> p.getRole() == role);
+            if (roleTaken) {
+                throw new RuntimeException("Role " + role + " already taken on team " + teamName);
+            }
 
-        boolean playerExists = room.getTeams().stream()
-                .flatMap(t -> t.getPlayers() != null ? t.getPlayers().stream() : Stream.empty())
-                .anyMatch(p -> p.getPlayerInfo().getId().equals(playerInfo.getId()));
-        if (playerExists) {
-            throw new RuntimeException("Player " + username + " is already in this room");
-        }
+            boolean playerExists = room.getTeams().stream()
+                    .flatMap(t -> t.getPlayers() != null ? t.getPlayers().stream() : Stream.empty())
+                    .anyMatch(p -> p.getPlayerInfo().getId().equals(playerInfo.getId()));
+            if (playerExists) {
+                throw new RuntimeException("Player " + username + " is already in this room");
+            }
 
-        Players player = new Players();
-        player.setPlayerInfo(playerInfo);
-        player.setUserName(playerInfo.getUserName());
-        player.setRole(role);
-        player.setInitialTeam(team);
-        playerRepository.save(player);
+            Players player = new Players();
+            player.setPlayerInfo(playerInfo);
+            player.setUserName(playerInfo.getUserName());
+            player.setRole(role);
+            player.setInitialTeam(team);
+            playerRepository.save(player);
 
-        if (team.getPlayers() == null) team.setPlayers(new ArrayList<>());
-        team.getPlayers().add(player);
+            if (team.getPlayers() == null) team.setPlayers(new java.util.HashSet<>());
+            team.getPlayers().add(player);
 
-        log.info("Player {} joined room {} / team {} as {}", username, roomId, teamName, role);
+            log.info("Player {} joined room {} / team {} as {}", username, roomId, teamName, role);
 
-        // FIX: was broadcastRoomState(roomId, room) — mid-transaction.
-        // Now registered to fire AFTER the transaction commits, so clients
-        // always receive state that is fully written to the database.
-        broadcastService.broadcastRoomAfterCommit(roomId);
+            // FIX: was broadcastRoomState(roomId, room) — mid-transaction.
+            // Now registered to fire AFTER the transaction commits, so clients
+            // always receive state that is fully written to the database.
+            broadcastService.broadcastRoomAfterCommit(roomId);
 
-        if (isRoomFull(room)) {
-            startGame(room);
-        }
+            if (isRoomFull(room)) {
+                startGame(room);
+            }
 
-        return room;
+            return room;
+        });
     }
 
     private boolean isRoomFull(GameRoom room) {
