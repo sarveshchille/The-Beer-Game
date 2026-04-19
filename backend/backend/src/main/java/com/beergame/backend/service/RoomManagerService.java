@@ -89,7 +89,14 @@ public class RoomManagerService {
             PlayerInfo playerInfo = playerInfoRepository.findByUserName(username)
                     .orElseThrow(() -> new RuntimeException("User not found: " + username));
 
-            Team team = teamRepository.findByGameRoomAndTeamName(room, teamName)
+            // Check if player is already in the room
+            Players existingPlayer = room.getTeams().stream()
+                    .flatMap(t -> t.getPlayers() != null ? t.getPlayers().stream() : Stream.empty())
+                    .filter(p -> p.getPlayerInfo().getId().equals(playerInfo.getId()))
+                    .findFirst()
+                    .orElse(null);
+
+            Team targetTeam = teamRepository.findByGameRoomAndTeamName(room, teamName)
                     .orElseGet(() -> {
                         if (room.getTeams() != null && room.getTeams().size() >= 4) {
                             throw new RuntimeException("Room is full (4 teams already exist)");
@@ -100,30 +107,42 @@ public class RoomManagerService {
                         return teamRepository.save(newTeam);
                     });
 
-            boolean roleTaken = team.getPlayers() != null && team.getPlayers().stream()
-                    .anyMatch(p -> p.getRole() == role);
+            boolean roleTaken = targetTeam.getPlayers() != null && targetTeam.getPlayers().stream()
+                    .anyMatch(p -> p.getRole() == role && (existingPlayer == null || !p.getId().equals(existingPlayer.getId())));
             if (roleTaken) {
                 throw new RuntimeException("Role " + role + " already taken on team " + teamName);
             }
 
-            boolean playerExists = room.getTeams().stream()
-                    .flatMap(t -> t.getPlayers() != null ? t.getPlayers().stream() : Stream.empty())
-                    .anyMatch(p -> p.getPlayerInfo().getId().equals(playerInfo.getId()));
-            if (playerExists) {
-                throw new RuntimeException("Player " + username + " is already in this room");
+            if (existingPlayer != null) {
+                // Player is switching seats! Remove from old team safely
+                Team oldTeam = existingPlayer.getInitialTeam();
+                if (oldTeam != null && oldTeam.getPlayers() != null) {
+                    oldTeam.getPlayers().removeIf(p -> p.getId().equals(existingPlayer.getId()));
+                }
+                
+                // Reassign to new team and role
+                existingPlayer.setInitialTeam(targetTeam);
+                existingPlayer.setRole(role);
+                playerRepository.save(existingPlayer);
+
+                if (targetTeam.getPlayers() == null) targetTeam.setPlayers(new java.util.HashSet<>());
+                targetTeam.getPlayers().add(existingPlayer);
+                
+                log.info("Player {} switched to room {} / team {} as {}", username, roomId, teamName, role);
+            } else {
+                // Brand new player joining
+                Players player = new Players();
+                player.setPlayerInfo(playerInfo);
+                player.setUserName(playerInfo.getUserName());
+                player.setRole(role);
+                player.setInitialTeam(targetTeam);
+                playerRepository.save(player);
+
+                if (targetTeam.getPlayers() == null) targetTeam.setPlayers(new java.util.HashSet<>());
+                targetTeam.getPlayers().add(player);
+                
+                log.info("Player {} joined room {} / team {} as {}", username, roomId, teamName, role);
             }
-
-            Players player = new Players();
-            player.setPlayerInfo(playerInfo);
-            player.setUserName(playerInfo.getUserName());
-            player.setRole(role);
-            player.setInitialTeam(team);
-            playerRepository.save(player);
-
-            if (team.getPlayers() == null) team.setPlayers(new java.util.HashSet<>());
-            team.getPlayers().add(player);
-
-            log.info("Player {} joined room {} / team {} as {}", username, roomId, teamName, role);
 
             // FIX: was broadcastRoomState(roomId, room) — mid-transaction.
             // Now registered to fire AFTER the transaction commits, so clients
