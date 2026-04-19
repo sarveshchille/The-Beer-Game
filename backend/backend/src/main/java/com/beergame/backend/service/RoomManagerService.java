@@ -151,10 +151,10 @@ public class RoomManagerService {
                 log.info("Player {} joined room {} / team {} as {}", username, roomId, teamName, role);
             }
 
-            // FIX: was broadcastRoomState(roomId, room) — mid-transaction.
-            // Now registered to fire AFTER the transaction commits, so clients
-            // always receive state that is fully written to the database.
-            broadcastService.broadcastRoomAfterCommit(roomId);
+            // Broadcast the in-memory manipulated room directly.
+            // This is safer since executeWithLock might not be wrapped in a Spring @Transactional
+            // boundary, causing AFTER_COMMIT hooks to fail or db queries to read stale data.
+            broadcastService.broadcastRoomState(roomId, RoomStateDTO.fromGameRoom(room));
 
             if (isRoomFull(room)) {
                 startGame(room);
