@@ -54,7 +54,6 @@ import java.util.concurrent.CompletableFuture;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-@Transactional
 public class GameService {
 
     // ── Maximum order a player may place in one turn ──────────────────────────
@@ -133,6 +132,7 @@ public class GameService {
      * Adds a bot player to fill an empty role slot.
      * The creator calls this when they want to start with fewer than 4 humans.
      */
+    @Transactional
     public Game addBot(String gameId, Players.RoleType role, BotType botType) {
         String botUsername = "BOT_" + botType.name() + "_" + role.name();
         // Reuse joinGame — creates the player entry the same way
@@ -174,6 +174,7 @@ public class GameService {
             if (game.getPlayers().size() == 4 && game.getGameStatus() == Game.GameStatus.LOBBY) {
                 game.setGameStatus(Game.GameStatus.IN_PROGRESS);
                 gameRepository.save(game);
+                eventPublisher.publishEvent(new WeekStartedEvent(this, gameId, 1));
             }
 
             broadcastService.broadcastGameAfterCommit(gameId);
@@ -188,6 +189,7 @@ public class GameService {
     /**
      * Creates a new game lobby.
      */
+    @Transactional
     public Game createGame(String creatorUsername) {
         playerInfoRepository.findByUserName(creatorUsername)
                 .orElseThrow(() -> new RuntimeException("User not found: " + creatorUsername));
@@ -211,6 +213,7 @@ public class GameService {
      * Uses a Redis distributed lock (not JVM synchronized) so the
      * race-condition protection works across multiple server instances.
      */
+    @Transactional
     public Game joinGame(String gameIdRaw, String username, Players.RoleType role) {
         if (gameIdRaw == null) {
             throw new RuntimeException("gameId is null");
