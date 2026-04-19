@@ -160,7 +160,7 @@ public class RoomManagerService {
 
             newGames.add(game);
         }
-        room.setGames(newGames);
+        room.setGames(new java.util.HashSet<>(newGames));
 
         Players.RoleType[] roles = {
                 Players.RoleType.RETAILER,

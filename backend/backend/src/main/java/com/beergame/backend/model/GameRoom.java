@@ -2,6 +2,7 @@ package com.beergame.backend.model;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
@@ -31,7 +32,7 @@ public class GameRoom {
     private List<Team> teams;
 
     @OneToMany(mappedBy = "gameRoom", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
-    private List<Game> games;
+    private Set<Game> games;
 
     @Column(name = "finishedAt")
     private LocalDateTime finishedAt;

@@ -368,7 +368,7 @@ public class GameService {
 
                 log.info("All players in room {} ready. Advancing all games.", roomId);
 
-                List<Game> games = room.getGames();
+                List<Game> games = new ArrayList<>(room.getGames());
                 CompletableFuture<Void> g1 = roomAdvancementService.advanceGame(games.get(0).getId());
                 CompletableFuture<Void> g2 = roomAdvancementService.advanceGame(games.get(1).getId());
                 CompletableFuture<Void> g3 = roomAdvancementService.advanceGame(games.get(2).getId());
