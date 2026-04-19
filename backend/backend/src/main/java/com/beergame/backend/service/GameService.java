@@ -1,6 +1,7 @@
 package com.beergame.backend.service;
 
 import com.beergame.backend.config.GameConfig;
+import com.beergame.backend.dto.GameStateDTO;
 import com.beergame.backend.dto.GameTurnHistoryDTO;
 import com.beergame.backend.event.AllPlayersReadyEvent;
 import com.beergame.backend.event.WeekStartedEvent;
