@@ -8,6 +8,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.context.annotation.Lazy;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -21,12 +23,21 @@ import java.util.concurrent.TimeoutException;
 public class BotService {
 
     private final RestTemplate restTemplate;
+    
+    @Lazy
+    private final OrderService orderService;
 
     @Value("${bot.service.url}")
     private String botServiceUrl;
 
     private static final int MAX_RETRIES = 3;
     private static final long RETRY_DELAY_MS = 5_000; // 5s between retries
+
+    @Async
+    public void calculateAndPlaceOrderAsync(Game game, Players botPlayer, BotType activeBotType, int targetWeek) {
+        int order = calculateOrder(game, botPlayer, activeBotType);
+        orderService.placeOrder(game.getId(), botPlayer.getUserName(), order, targetWeek);
+    }
 
     public int calculateOrder(Game game, Players botPlayer) {
         return calculateOrder(game, botPlayer, botPlayer.getBotType());

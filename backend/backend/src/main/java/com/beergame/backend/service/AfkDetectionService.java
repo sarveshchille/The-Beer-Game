@@ -1,6 +1,5 @@
 package com.beergame.backend.service;
 
-import com.beergame.backend.event.AfkOrderRequestEvent;
 import com.beergame.backend.event.AllPlayersReadyEvent;
 import com.beergame.backend.event.WeekStartedEvent;
 import com.beergame.backend.model.BotType;
@@ -112,10 +111,7 @@ public class AfkDetectionService {
                     game.getId(), game.getCurrentWeek(), afkPlayers.size());
 
             for (Players afkPlayer : afkPlayers) {
-                // FIX 3: Pass BotType.EASY directly to calculateOrder instead of mutating the entity
-                int order = botService.calculateOrder(game, afkPlayer, BotType.EASY);
-                eventPublisher.publishEvent(
-                    new AfkOrderRequestEvent(this, game.getId(), afkPlayer.getUserName(), order));
+                botService.calculateAndPlaceOrderAsync(game, afkPlayer, BotType.EASY, game.getCurrentWeek());
             }
             
             // Lock this week so the next 40s cron tick ignores it while the async events resolve

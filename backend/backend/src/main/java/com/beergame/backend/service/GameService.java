@@ -2,7 +2,6 @@ package com.beergame.backend.service;
 
 import com.beergame.backend.config.GameConfig;
 import com.beergame.backend.dto.GameTurnHistoryDTO;
-import com.beergame.backend.event.AfkOrderRequestEvent;
 import com.beergame.backend.event.AllPlayersReadyEvent;
 import com.beergame.backend.event.WeekStartedEvent;
 import com.beergame.backend.model.BotType;
@@ -82,6 +81,7 @@ public class GameService {
     private final BotService botService;
     private final ApplicationEventPublisher eventPublisher;
     private final OrderService orderService;
+    private final org.springframework.transaction.support.TransactionTemplate transactionTemplate;
 
     // ─────────────────────────────────────────────────────────────────────────
     // Helpers
@@ -93,15 +93,6 @@ public class GameService {
             sb.append(ALPHANUMERIC.charAt(RANDOM.nextInt(ALPHANUMERIC.length())));
         }
         return sb.toString();
-    }
-
-    @Async
-    @EventListener
-    @Retryable(retryFor = OptimisticLockingFailureException.class, maxAttempts = 3, backoff = @Backoff(delay = 100, maxDelay = 500))
-    public void onAfkOrderRequest(AfkOrderRequestEvent event) {
-        log.info("Processing AFK bot order for player {} in game {}",
-                event.getUsername(), event.getGameId());
-        placeOrder(event.getGameId(), event.getUsername(), event.getOrderAmount());
     }
 
     /**
@@ -130,14 +121,11 @@ public class GameService {
         if (game == null || game.getGameStatus() != Game.GameStatus.IN_PROGRESS)
             return;
 
-        // 2. Do the slow network calls to Python WITHOUT locking the game
+        // 2. Dispatch async tasks to BotService so we don't block this listener thread
         game.getPlayers().stream()
                 .filter(p -> p.isBot() && !p.isReadyForOrder())
                 .forEach(bot -> {
-                    int order = botService.calculateOrder(game, bot); // Slow HTTP call
-
-                    // 3. placeOrder() handles its own lock internally. It's safe to call here.
-                   orderService.placeOrder(game.getId(), bot.getUserName(), order);
+                    botService.calculateAndPlaceOrderAsync(game, bot, bot.getBotType(), game.getCurrentWeek());
                 });
     }
 
@@ -317,49 +305,7 @@ public class GameService {
      * consistent data.
      */
     public void placeOrder(String gameId, String username, int orderAmount) {
-        // 1. Wrap the entire order processing in the distributed lock
-        redisLockService.executeWithLock(gameId, 10, () -> {
-
-            if (orderAmount < 0 || orderAmount > MAX_ORDER_AMOUNT) {
-                throw new IllegalArgumentException(
-                        "Order amount must be 0–" + MAX_ORDER_AMOUNT + ", got: " + orderAmount);
-            }
-
-            Game game = gameRepository.findByIdWithPlayers(gameId)
-                    .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
-
-            // 🚨 CHANGE THIS LINE 🚨
-            Players player = playerRepository.findByGameAndUserName(game, username)
-                    .orElseThrow(() -> new RuntimeException("Player not in game: " + username));
-
-            if (player.isReadyForOrder()) {
-                log.warn("Player {} already submitted an order for week {}", username, game.getCurrentWeek());
-                return null;
-            }
-
-            player.setCurrentOrder(orderAmount);
-            player.setReadyForOrder(true);
-            playerRepository.save(player);
-
-            log.info("Player {} placed order {} for week {}", username, orderAmount, game.getCurrentWeek());
-
-            if (game.getPlayers() == null || game.getPlayers().size() < 4) {
-                broadcastService.broadcastGameAfterCommit(gameId);
-                return null;
-            }
-
-            boolean allReady = game.getPlayers().stream().allMatch(Players::isReadyForOrder);
-
-            if (allReady) {
-                log.info("All players ready for game {}. Advancing turn.", gameId);
-                eventPublisher.publishEvent(
-                        new AllPlayersReadyEvent(this, gameId, game.getCurrentWeek()));
-                turnService.advanceTurn(gameId);
-            } else {
-                broadcastService.broadcastGameAfterCommit(gameId);
-            }
-            return null;
-        });
+        orderService.placeOrder(gameId, username, orderAmount, null);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -372,57 +318,62 @@ public class GameService {
      * FIX: intermediate state is now broadcast post-commit (not mid-transaction).
      */
     public void submitRoomOrder(String roomId, String username, int orderAmount) {
-        // ── Validate ──────────────────────────────────────────────────────────
-        if (orderAmount < 0 || orderAmount > MAX_ORDER_AMOUNT) {
-            throw new IllegalArgumentException(
-                    "Order amount must be 0–" + MAX_ORDER_AMOUNT + ", got: " + orderAmount);
-        }
+        redisLockService.executeWithLock(roomId, 10, () -> {
+            return transactionTemplate.execute(status -> {
+                // ── Validate ──────────────────────────────────────────────────────────
+                if (orderAmount < 0 || orderAmount > MAX_ORDER_AMOUNT) {
+                    throw new IllegalArgumentException(
+                            "Order amount must be 0–" + MAX_ORDER_AMOUNT + ", got: " + orderAmount);
+                }
 
-        GameRoom room = gameRoomRepository.findByIdWithAllData(roomId)
-                .orElseThrow(() -> new RuntimeException("Room not found: " + roomId));
+                GameRoom room = gameRoomRepository.findByIdWithAllData(roomId)
+                        .orElseThrow(() -> new RuntimeException("Room not found: " + roomId));
 
-        if (room.getStatus() != GameRoom.RoomStatus.RUNNING) {
-            throw new RuntimeException("Room " + roomId + " is not currently running.");
-        }
+                if (room.getStatus() != GameRoom.RoomStatus.RUNNING) {
+                    throw new RuntimeException("Room " + roomId + " is not currently running.");
+                }
 
-        Players player = room.getTeams().stream()
-                .flatMap(team -> team.getPlayers().stream())
-                .filter(p -> p.getPlayerInfo().getUserName().equals(username))
-                .findFirst()
-                .orElseThrow(() -> new RuntimeException("Player not found in room: " + username));
+                Players player = room.getTeams().stream()
+                        .flatMap(team -> team.getPlayers().stream())
+                        .filter(p -> p.getPlayerInfo().getUserName().equals(username))
+                        .findFirst()
+                        .orElseThrow(() -> new RuntimeException("Player not found in room: " + username));
 
-        if (player.isReadyForOrder()) {
-            log.warn("Player {} already submitted order for room {}", username, roomId);
-            return;
-        }
+                if (player.isReadyForOrder()) {
+                    log.warn("Player {} already submitted order for room {}", username, roomId);
+                    return null;
+                }
 
-        player.setCurrentOrder(orderAmount);
-        player.setReadyForOrder(true);
-        playerRepository.save(player);
+                player.setCurrentOrder(orderAmount);
+                player.setReadyForOrder(true);
+                playerRepository.save(player);
 
-        boolean allReady = room.getTeams().stream()
-                .flatMap(team -> team.getPlayers().stream())
-                .allMatch(Players::isReadyForOrder);
+                boolean allReady = room.getTeams().stream()
+                        .flatMap(team -> team.getPlayers().stream())
+                        .allMatch(Players::isReadyForOrder);
 
-        if (!allReady) {
-            // FIX: was calling broadcastRoomState() mid-transaction (before commit).
-            // Now we wait until after commit so clients see consistent DB state.
-            broadcastService.broadcastRoomAfterCommit(roomId);
-            return;
-        }
+                if (!allReady) {
+                    // FIX: was calling broadcastRoomState() mid-transaction (before commit).
+                    // Now we wait until after commit so clients see consistent DB state.
+                    broadcastService.broadcastRoomAfterCommit(roomId);
+                    return null;
+                }
 
-        log.info("All players in room {} ready. Advancing all games.", roomId);
+                log.info("All players in room {} ready. Advancing all games.", roomId);
 
-        List<Game> games = room.getGames();
-        CompletableFuture<Void> g1 = roomAdvancementService.advanceGame(games.get(0).getId());
-        CompletableFuture<Void> g2 = roomAdvancementService.advanceGame(games.get(1).getId());
-        CompletableFuture<Void> g3 = roomAdvancementService.advanceGame(games.get(2).getId());
-        CompletableFuture<Void> g4 = roomAdvancementService.advanceGame(games.get(3).getId());
+                List<Game> games = room.getGames();
+                CompletableFuture<Void> g1 = roomAdvancementService.advanceGame(games.get(0).getId());
+                CompletableFuture<Void> g2 = roomAdvancementService.advanceGame(games.get(1).getId());
+                CompletableFuture<Void> g3 = roomAdvancementService.advanceGame(games.get(2).getId());
+                CompletableFuture<Void> g4 = roomAdvancementService.advanceGame(games.get(3).getId());
 
-        CompletableFuture.allOf(g1, g2, g3, g4).thenRun(() -> {
-            log.info("All games in room {} advanced. Running post-turn cleanup.", roomId);
-            // turnService is a different bean → @Transactional works correctly here
-            turnService.postAdvanceRoomTurn(roomId);
+                CompletableFuture.allOf(g1, g2, g3, g4).thenRun(() -> {
+                    log.info("All games in room {} advanced. Running post-turn cleanup.", roomId);
+                    // turnService is a different bean → @Transactional works correctly here
+                    turnService.postAdvanceRoomTurn(roomId);
+                });
+                return null;
+            });
         });
     }
 
