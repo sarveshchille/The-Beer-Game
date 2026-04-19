@@ -1,4 +1,8 @@
 package com.beergame.backend.dto;
 
-public record OrderPayloadDTO(int orderAmount) {
+import com.fasterxml.jackson.annotation.JsonProperty;
+
+public record OrderPayloadDTO(
+    @JsonProperty("orderAmount") int orderAmount
+) {
 }
