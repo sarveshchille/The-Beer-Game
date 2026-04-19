@@ -48,7 +48,7 @@ public class AuthService {
 
         // FIX: was Math.random() — now SecureRandom
         int token = 100_000 + SECURE_RANDOM.nextInt(900_000);
-        log.info("OTP generated for {}", loginDTO.email());
+        log.info("OTP generated for {} : {}", loginDTO.email(), token);
 
         emailService.sendVerificationEmail(loginDTO.email(), token);
         return new RegisterResponseDTO(token, LocalDateTime.now());

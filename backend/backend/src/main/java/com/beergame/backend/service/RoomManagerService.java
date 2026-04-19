@@ -90,8 +90,9 @@ public class RoomManagerService {
             PlayerInfo playerInfo = playerInfoRepository.findByUserName(username)
                     .orElseThrow(() -> new RuntimeException("User not found: " + username));
 
-            // Check if player is already in the room
-            Players existingPlayer = room.getTeams().stream()
+            // Check if player is already in the room (null-safe for fresh rooms with no teams yet)
+            Players existingPlayer = (room.getTeams() == null) ? null :
+                    room.getTeams().stream()
                     .flatMap(t -> t.getPlayers() != null ? t.getPlayers().stream() : Stream.empty())
                     .filter(p -> p.getPlayerInfo().getId().equals(playerInfo.getId()))
                     .findFirst()
