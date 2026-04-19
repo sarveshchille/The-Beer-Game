@@ -15,6 +15,8 @@ import org.springframework.context.event.EventListener;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -68,11 +70,11 @@ public class AfkDetectionService {
         redisTemplate.delete(AFK_KEY_PREFIX + gameId + ":" + week);
     }
 
-    @EventListener
+@TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
    public void onWeekStarted(WeekStartedEvent event) {
     String key = AFK_KEY_PREFIX + event.getGameId() + ":" + event.getWeek();
     redisTemplate.opsForValue()
-        .set(key, "active", AFK_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        .set(key, "active", AFK_TIMEOUT_SECONDS, TimeUnit.MINUTES);
     log.info("AFK timer started for game {} week {}", event.getGameId(), event.getWeek());
    }
 

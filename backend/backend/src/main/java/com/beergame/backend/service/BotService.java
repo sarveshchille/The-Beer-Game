@@ -11,6 +11,9 @@ import org.springframework.web.client.RestTemplate;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 @Service
 @RequiredArgsConstructor
@@ -29,45 +32,41 @@ public class BotService {
         return calculateOrder(game, botPlayer, botPlayer.getBotType());
     }
 
-    public int calculateOrder(Game game, Players botPlayer, BotType activeBotType) {
-        String endpoint = resolveEndpoint(activeBotType);
-        Map<String, Object> payload = buildPayload(game, botPlayer);
+ // BotService.java - run in a separate thread with a hard timeout
+public int calculateOrder(Game game, Players botPlayer, BotType activeBotType) {
+    String endpoint = resolveEndpoint(activeBotType);
+    Map<String, Object> payload = buildPayload(game, botPlayer);
 
-        for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-            try {
+    for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            CompletableFuture<Map<String, Object>> future = CompletableFuture.supplyAsync(() -> {
                 @SuppressWarnings("unchecked")
-                Map<String, Object> response = restTemplate.postForObject(
-                        botServiceUrl + endpoint, payload, Map.class);
+                Map<String, Object> resp = restTemplate.postForObject(
+                    botServiceUrl + endpoint, payload, Map.class);
+                return resp;
+            });
 
-                if (response == null || !response.containsKey("predicted_order")) {
-                    log.error("Invalid bot response for game {} (attempt {})", game.getId(), attempt);
-                    continue; // retry
-                }
+            Map<String, Object> response = future.get(10, TimeUnit.SECONDS); // hard deadline
 
+            if (response != null && response.containsKey("predicted_order")) {
                 int order = ((Number) response.get("predicted_order")).intValue();
-                log.info("Bot {} calculated order {} for game {} week {} (attempt {})",
-                        botPlayer.getUserName(), order, game.getId(), game.getCurrentWeek(), attempt);
-                return order;
-
-            } catch (Exception e) {
-                log.warn("Bot call failed for player {} in game {} (attempt {}/{}): {}",
-                        botPlayer.getUserName(), game.getId(), attempt, MAX_RETRIES, e.getMessage());
-
-                if (attempt < MAX_RETRIES) {
-                    try {
-                        Thread.sleep(RETRY_DELAY_MS);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
+order = Math.max(0, Math.min(order, GameService.MAX_ORDER_AMOUNT)); 
+return order;
+            }
+        } catch (TimeoutException e) {
+            log.warn("Bot call timed out for {} attempt {}/{}", botPlayer.getUserName(), attempt, MAX_RETRIES);
+        } catch (Exception e) {
+            log.warn("Bot call failed attempt {}/{}: {}", attempt, MAX_RETRIES, e.getMessage());
+            if (attempt < MAX_RETRIES) {
+                try { Thread.sleep(RETRY_DELAY_MS); } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt(); break;
                 }
             }
         }
-
-        log.error("All {} attempts failed for player {} in game {}. Defaulting to order 0.",
-                MAX_RETRIES, botPlayer.getUserName(), game.getId());
-        return 0;
     }
+    log.error("All attempts failed for {}. Defaulting to 0.", botPlayer.getUserName());
+    return 0;
+}
 
     private Map<String, Object> buildPayload(Game game, Players botPlayer) {
         int currentWeek = game.getCurrentWeek();

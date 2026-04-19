@@ -62,13 +62,11 @@ public class Game {
      * Per-game festive week numbers. Generated once at creation via
      * GameConfig.generateFestiveWeeks() and never mutated afterwards.
      */
-    @ElementCollection(fetch = FetchType.EAGER)
-    @CollectionTable(
-            name = "game_festive_weeks",
-            joinColumns = @JoinColumn(name = "game_id")
-    )
-    @Column(name = "festive_week")
-    private Set<Integer> festiveWeeks = new HashSet<>();
+@ElementCollection(fetch = FetchType.EAGER)
+@CollectionTable(name = "game_festive_weeks", schema = "beergame_schema",
+    joinColumns = @JoinColumn(name = "game_id"))
+@Column(name = "festive_week")
+private Set<Integer> festiveWeeks = new HashSet<>();
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "gameRoomId")

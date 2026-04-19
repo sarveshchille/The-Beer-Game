@@ -81,6 +81,7 @@ public class GameService {
     private final BroadcastService broadcastService;
     private final BotService botService;
     private final ApplicationEventPublisher eventPublisher;
+    private final OrderService orderService;
 
     // ─────────────────────────────────────────────────────────────────────────
     // Helpers
@@ -136,7 +137,7 @@ public class GameService {
                     int order = botService.calculateOrder(game, bot); // Slow HTTP call
 
                     // 3. placeOrder() handles its own lock internally. It's safe to call here.
-                    placeOrder(game.getId(), bot.getUserName(), order);
+                   orderService.placeOrder(game.getId(), bot.getUserName(), order);
                 });
     }
 
