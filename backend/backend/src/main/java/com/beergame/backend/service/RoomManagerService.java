@@ -241,9 +241,8 @@ public class RoomManagerService {
         gameRoomRepository.save(room);
         log.info("Room {} started successfully", room.getId());
 
-        // FIX: was a direct broadcastRoomState() mid-transaction.
-        broadcastService.broadcastRoomAfterCommit(room.getId());
-
+        // Immediately broadcast RUNNING state directly from memory to bypass transactional race conditions
+        broadcastService.broadcastRoomState(room.getId(), RoomStateDTO.fromGameRoom(room));
         // Publish WeekStartedEvent for each game AFTER commit so the AFK timer
         // is correctly armed. Without this the AFK scheduler sees no Redis key
         // and immediately treats all 16 players as AFK on its first 40s tick.
