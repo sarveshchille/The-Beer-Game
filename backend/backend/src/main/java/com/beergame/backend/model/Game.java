@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Set;
 
 import jakarta.persistence.*;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.ToString;
@@ -76,6 +77,7 @@ private Set<Integer> festiveWeeks = new HashSet<>();
     @JoinColumn(name = "gameRoomId")
     @EqualsAndHashCode.Exclude
     @ToString.Exclude
+    @JsonIgnore
     private GameRoom gameRoom;
 
     public enum GameStatus {

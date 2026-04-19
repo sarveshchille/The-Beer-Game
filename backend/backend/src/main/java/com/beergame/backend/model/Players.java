@@ -86,6 +86,7 @@ public class Players {
     @JoinColumn(name = "game_id")
     @EqualsAndHashCode.Exclude
     @ToString.Exclude
+    @JsonIgnore
     private Game game;
 
     @OneToMany(mappedBy = "player", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
@@ -102,6 +103,7 @@ public class Players {
     @JoinColumn(name = "initialTeamId")
     @EqualsAndHashCode.Exclude
     @ToString.Exclude
+    @JsonIgnore
     private Team initialTeam;
 
     @Column(name = "is_bot")
