@@ -39,6 +39,15 @@ public class BotService {
         orderService.placeOrder(game.getId(), botPlayer.getUserName(), order, targetWeek);
     }
 
+    @Async
+    public void ping() {
+        try {
+            restTemplate.getForEntity(botServiceUrl + "/docs", String.class);
+        } catch (Exception e) {
+            log.trace("Pinged bot service.");
+        }
+    }
+
     public int calculateOrder(Game game, Players botPlayer) {
         return calculateOrder(game, botPlayer, botPlayer.getBotType());
     }
@@ -61,11 +70,16 @@ public int calculateOrder(Game game, Players botPlayer, BotType activeBotType) {
 
             if (response != null && response.containsKey("predicted_order")) {
                 int order = ((Number) response.get("predicted_order")).intValue();
-order = Math.max(0, Math.min(order, GameService.MAX_ORDER_AMOUNT)); 
-return order;
+                order = Math.max(0, Math.min(order, GameService.MAX_ORDER_AMOUNT)); 
+                return order;
             }
         } catch (TimeoutException e) {
             log.warn("Bot call timed out for {} attempt {}/{}", botPlayer.getUserName(), attempt, MAX_RETRIES);
+            if (attempt < MAX_RETRIES) {
+                try { Thread.sleep(RETRY_DELAY_MS); } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt(); break;
+                }
+            }
         } catch (Exception e) {
             log.warn("Bot call failed attempt {}/{}: {}", attempt, MAX_RETRIES, e.getMessage());
             if (attempt < MAX_RETRIES) {
@@ -86,7 +100,7 @@ return order;
                 .filter(w -> w > currentWeek)
                 .mapToInt(Integer::intValue)
                 .min()
-                .orElse(0);
+                .orElse(99); // Use 99 so (festive_week - week) > 0 and prevents Python side math errors on week 22
 
         Map<String, Object> payload = new HashMap<>();
         payload.put("game_id", game.getId());

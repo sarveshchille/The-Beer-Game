@@ -204,6 +204,10 @@ public class GameService {
 
         Game saved = gameRepository.save(game);
         log.info("Created game id={}", saved.getId());
+        
+        // Ping the bot service to wake up the Render instance
+        botService.ping();
+        
         return saved;
     }
 
