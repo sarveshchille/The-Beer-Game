@@ -280,9 +280,12 @@ public class RoomManagerService {
             @Override
             public void afterCommit() {
                 for (Game g : committedGames) {
-                    // This explicitly pushes the GameStateDTO data to /topic/game/{gameId}
-                    // so the DashBoard.jsx immediately drops the loading screen and shows their stats!
-                    broadcastService.broadcastGameAfterCommit(g.getId());
+                    // ✅ CRITICAL FIX: Call broadcastGameState() DIRECTLY here.
+                    // broadcastGameAfterCommit() registers a NEW TransactionSynchronization,
+                    // but we are ALREADY inside afterCommit — no active transaction exists!
+                    // Spring silently drops the nested registration, so game state was NEVER sent.
+                    // broadcastGameState(String) does a fresh DB read then sends to WebSocket — safe here.
+                    broadcastService.broadcastGameState(g.getId());
                     eventPublisher.publishEvent(new WeekStartedEvent(RoomManagerService.this, g.getId(), 1));
                 }
             }

@@ -434,4 +434,16 @@ public class GameService {
     public void broadcastGameState(String gameId) {
         broadcastService.broadcastGameState(gameId);
     }
+
+    /**
+     * Returns the current GameStateDTO for a game by ID.
+     * Used by GET /api/game/{gameId} to let clients seed their UI on mount
+     * without relying on a WebSocket broadcast that may have already fired.
+     */
+    @Transactional(readOnly = true)
+    public GameStateDTO getGameState(String gameId) {
+        Game game = gameRepository.findByIdWithPlayers(gameId)
+                .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
+        return GameStateDTO.fromGame(game);
+    }
 }

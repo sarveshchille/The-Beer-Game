@@ -67,6 +67,23 @@ public class GameController {
         return ResponseEntity.ok(gameService.getGameHistory(gameId));
     }
 
+    /**
+     * GET /api/game/{gameId}
+     * Returns the current GameStateDTO for a game.
+     * Used by the Dashboard to seed initial state on mount,
+     * solving the race condition where the WebSocket broadcast fires
+     * before any client has subscribed to the topic.
+     */
+    @GetMapping("/{gameId}")
+    public ResponseEntity<GameStateDTO> getGameState(@PathVariable String gameId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+
+        if (userDetails == null) {
+            return ResponseEntity.status(401).build();
+        }
+        return ResponseEntity.ok(gameService.getGameState(gameId));
+    }
+
     @PostMapping("/{gameId}/addBot")
 public ResponseEntity<GameStateDTO> addBot(
         @PathVariable String gameId,
