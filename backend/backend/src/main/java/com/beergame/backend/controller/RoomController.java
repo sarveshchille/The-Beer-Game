@@ -4,6 +4,7 @@ import com.beergame.backend.dto.JoinRoomRequestDTO;
 import com.beergame.backend.dto.RoomStateDTO;
 import com.beergame.backend.model.GameRoom;
 import com.beergame.backend.model.Players;
+import com.beergame.backend.repository.GameRoomRepository;
 import com.beergame.backend.service.RoomManagerService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -18,11 +19,23 @@ import org.springframework.web.bind.annotation.*;
 public class RoomController {
 
     private final RoomManagerService roomManagerService;
+    private final GameRoomRepository gameRoomRepository;
+
+    /**
+     * GET /api/room/{roomId}
+     * Lets a player (or the frontend) fetch the current room state at any time —
+     * useful after a page reload, late join, or when building the lobby UI.
+     */
+    @GetMapping("/{roomId}")
+    public ResponseEntity<RoomStateDTO> getRoom(@PathVariable String roomId) {
+        GameRoom room = gameRoomRepository.findByIdWithAllData(roomId)
+                .orElseThrow(() -> new RuntimeException("Room not found: " + roomId));
+        return ResponseEntity.ok(RoomStateDTO.fromGameRoom(room));
+    }
 
     @PostMapping("/create")
     public ResponseEntity<RoomStateDTO> createRoom() {
         GameRoom newRoom = roomManagerService.createRoom();
-        // BUG 8 FIX: return DTO instead of raw entity to avoid LazyInitializationException
         return ResponseEntity.ok(RoomStateDTO.fromGameRoom(newRoom));
     }
 
@@ -36,7 +49,6 @@ public class RoomController {
                 request.teamName(),
                 Players.RoleType.valueOf(request.role().toUpperCase()),
                 userDetails.getUsername());
-        // BUG 8 FIX: return DTO instead of raw entity to avoid LazyInitializationException
         return ResponseEntity.ok(RoomStateDTO.fromGameRoom(room));
     }
 }

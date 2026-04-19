@@ -71,6 +71,28 @@ public class RoomManagerService {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Helpers
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Normalizes a team name: trims whitespace and title-cases each word.
+     * "alpha" → "Alpha",  " BRAVO " → "Bravo",  "my team" → "My Team".
+     */
+    private static String toTitleCase(String input) {
+        if (input == null) return "";
+        String[] words = input.trim().split("\\s+");
+        StringBuilder sb = new StringBuilder();
+        for (String word : words) {
+            if (!word.isEmpty()) {
+                if (sb.length() > 0) sb.append(' ');
+                sb.append(Character.toUpperCase(word.charAt(0)));
+                sb.append(word.substring(1).toLowerCase());
+            }
+        }
+        return sb.toString();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
 
     public GameRoom createRoom() {
         GameRoom room = new GameRoom();
@@ -85,6 +107,8 @@ public class RoomManagerService {
     public GameRoom joinRoom(String roomIdRaw, String teamName, Players.RoleType role, String username) {
         if (roomIdRaw == null) throw new RuntimeException("roomId is null");
         String roomId = roomIdRaw.trim();
+        // Normalize: "alpha", "ALPHA", " Alpha " all become "Alpha"
+        String normalizedTeamName = toTitleCase(teamName);
         return redisLockService.executeWithLock(roomId, 10, () -> {
             GameRoom room = gameRoomRepository.findByIdWithAllData(roomId)
                     .orElseThrow(() -> new RuntimeException("Room not found: " + roomId));
@@ -104,13 +128,18 @@ public class RoomManagerService {
                     .findFirst()
                     .orElse(null);
 
-            Team targetTeam = teamRepository.findByGameRoomAndTeamName(room, teamName)
+            Team targetTeam = teamRepository.findByGameRoomAndTeamNameIgnoreCase(room, normalizedTeamName)
                     .orElseGet(() -> {
-                        if (room.getTeams() != null && room.getTeams().size() >= 4) {
-                            throw new RuntimeException("Room is full (4 teams already exist)");
+                        int currentTeamCount = room.getTeams() != null ? room.getTeams().size() : 0;
+                        if (currentTeamCount >= 4) {
+                            String existing = room.getTeams().stream()
+                                    .map(Team::getTeamName)
+                                    .collect(java.util.stream.Collectors.joining(", "));
+                            throw new RuntimeException(
+                                    "Room already has 4 teams (" + existing + "). Please join one of the existing teams.");
                         }
                         Team newTeam = new Team();
-                        newTeam.setTeamName(teamName);
+                        newTeam.setTeamName(normalizedTeamName);
                         newTeam.setGameRoom(room);
                         return teamRepository.save(newTeam);
                     });

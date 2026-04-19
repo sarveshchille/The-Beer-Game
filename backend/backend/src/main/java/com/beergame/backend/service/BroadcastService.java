@@ -1,6 +1,7 @@
 package com.beergame.backend.service;
 
 import com.beergame.backend.dto.GameStateDTO;
+import com.beergame.backend.dto.RoomResultDTO;
 import com.beergame.backend.dto.RoomStateDTO;
 import com.beergame.backend.model.Game;
 import com.beergame.backend.model.GameRoom;
@@ -104,5 +105,23 @@ public class BroadcastService {
                 broadcastRoomState(roomId);
             }
         });
+    }
+
+    // ───────────────────────────────────────────────────────────────────── //
+    //  Room result broadcast (fired once when room is FINISHED)
+    // ───────────────────────────────────────────────────────────────────── //
+
+    /**
+     * Publishes the winner announcement + full leaderboard on a dedicated Redis
+     * channel so all subscribers can render the results / comparison screen.
+     *
+     * Channel : room-result:{roomId}
+     * WS topic: /topic/room/{roomId}/result
+     */
+    public void broadcastRoomResult(GameRoom room) {
+        RoomResultDTO result = RoomResultDTO.fromRoom(room);
+        String channel = "room-result:" + room.getId();
+        log.info("Broadcasting room result for room {} — winner: {}", room.getId(), result.getWinnerTeamName());
+        redisTemplate.convertAndSend(channel, result);
     }
 }

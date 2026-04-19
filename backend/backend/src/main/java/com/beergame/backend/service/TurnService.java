@@ -200,5 +200,11 @@ public class TurnService {
 
         gameRoomRepository.save(room);
         broadcastService.broadcastRoomState(roomId, room);
+
+        // Announce winner once all games are done
+        if (allGamesFinished) {
+            log.info("Room {} — all games finished. Broadcasting result.", roomId);
+            broadcastService.broadcastRoomResult(room);
+        }
     }
 }

@@ -1,9 +1,11 @@
 package com.beergame.backend.config;
 
 import com.beergame.backend.dto.GameStateDTO;
-import com.beergame.backend.dto.RoomStateDTO; // 👈 --- ADD THIS IMPORT
+import com.beergame.backend.dto.RoomResultDTO;
+import com.beergame.backend.dto.RoomStateDTO;
 import com.beergame.backend.service.GameStateSubscriber;
-import com.beergame.backend.service.RoomStateSubscriber; // 👈 --- You will create this
+import com.beergame.backend.service.RoomResultSubscriber;
+import com.beergame.backend.service.RoomStateSubscriber;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
@@ -17,10 +19,8 @@ import org.springframework.data.redis.serializer.StringRedisSerializer;
 @Configuration
 public class RedisConfig {
 
-    // This bean is fine
     @Bean
     public RedisTemplate<String, Object> redisTemplate(RedisConnectionFactory connectionFactory) {
-        // ... (your existing code is correct) ...
         RedisTemplate<String, Object> template = new RedisTemplate<>();
         template.setConnectionFactory(connectionFactory);
         template.setKeySerializer(new StringRedisSerializer());
@@ -28,39 +28,43 @@ public class RedisConfig {
         return template;
     }
 
-    /**
-     * ✅ FIX: Listener adapter for GAME state
-     */
+    /** Listener adapter for game-updates:{gameId} → forwards GameStateDTO */
     @Bean
     MessageListenerAdapter gameListenerAdapter(GameStateSubscriber subscriber) {
         MessageListenerAdapter adapter = new MessageListenerAdapter(subscriber, "receiveMessage");
-        // Tell it to deserialize GameStateDTO
         adapter.setSerializer(new Jackson2JsonRedisSerializer<>(GameStateDTO.class));
         return adapter;
     }
 
-    /**
-     * ✅ FIX: Listener adapter for ROOM state
-     */
+    /** Listener adapter for room-updates:{roomId} → forwards RoomStateDTO */
     @Bean
     MessageListenerAdapter roomListenerAdapter(RoomStateSubscriber subscriber) {
         MessageListenerAdapter adapter = new MessageListenerAdapter(subscriber, "receiveMessage");
-        // Tell it to deserialize RoomStateDTO
         adapter.setSerializer(new Jackson2JsonRedisSerializer<>(RoomStateDTO.class));
         return adapter;
     }
 
+    /** Listener adapter for room-result:{roomId} → forwards RoomResultDTO (winner announcement) */
     @Bean
-    RedisMessageListenerContainer redisContainer(RedisConnectionFactory connectionFactory,
-            MessageListenerAdapter gameListenerAdapter, // 👈 --- Inject game adapter
-            MessageListenerAdapter roomListenerAdapter // 👈 --- Inject room adapter
-    ) {
+    MessageListenerAdapter roomResultListenerAdapter(RoomResultSubscriber subscriber) {
+        MessageListenerAdapter adapter = new MessageListenerAdapter(subscriber, "receiveMessage");
+        adapter.setSerializer(new Jackson2JsonRedisSerializer<>(RoomResultDTO.class));
+        return adapter;
+    }
+
+    @Bean
+    RedisMessageListenerContainer redisContainer(
+            RedisConnectionFactory connectionFactory,
+            MessageListenerAdapter gameListenerAdapter,
+            MessageListenerAdapter roomListenerAdapter,
+            MessageListenerAdapter roomResultListenerAdapter) {
+
         RedisMessageListenerContainer container = new RedisMessageListenerContainer();
         container.setConnectionFactory(connectionFactory);
 
-        // ✅ FIX: Subscribe each adapter to its OWN topic
-        container.addMessageListener(gameListenerAdapter, new PatternTopic("game-updates:*"));
-        container.addMessageListener(roomListenerAdapter, new PatternTopic("room-updates:*"));
+        container.addMessageListener(gameListenerAdapter,       new PatternTopic("game-updates:*"));
+        container.addMessageListener(roomListenerAdapter,       new PatternTopic("room-updates:*"));
+        container.addMessageListener(roomResultListenerAdapter, new PatternTopic("room-result:*"));
 
         return container;
     }

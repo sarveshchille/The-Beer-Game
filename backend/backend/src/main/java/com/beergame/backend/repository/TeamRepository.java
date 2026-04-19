@@ -7,4 +7,5 @@ import java.util.Optional;
 
 public interface TeamRepository extends JpaRepository<Team, Long> {
     Optional<Team> findByGameRoomAndTeamName(GameRoom gameRoom, String teamName);
+    Optional<Team> findByGameRoomAndTeamNameIgnoreCase(GameRoom gameRoom, String teamName);
 }

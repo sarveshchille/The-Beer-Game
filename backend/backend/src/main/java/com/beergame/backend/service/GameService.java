@@ -356,7 +356,7 @@ public class GameService {
                 playerRepository.save(player);
 
                 boolean allReady = room.getTeams().stream()
-                        .flatMap(team -> team.getPlayers().stream())
+                        .flatMap(team -> team.getPlayers() != null ? team.getPlayers().stream() : java.util.stream.Stream.empty())
                         .allMatch(Players::isReadyForOrder);
 
                 if (!allReady) {
