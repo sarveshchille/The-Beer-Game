@@ -343,7 +343,7 @@ public class GameService {
 
                 Players player = room.getTeams().stream()
                         .flatMap(team -> team.getPlayers() != null ? team.getPlayers().stream() : java.util.stream.Stream.empty())
-                        .filter(p -> p.getPlayerInfo().getUserName().equals(username))
+                        .filter(p -> p.getUserName().equals(username))
                         .findFirst()
                         .orElseThrow(() -> new RuntimeException("Player not found in room: " + username));
 
@@ -370,18 +370,21 @@ public class GameService {
                 log.info("All players in room {} ready. Advancing all games.", roomId);
 
                 List<String> gameIds = room.getGames().stream().map(Game::getId).toList();
-                
+
+                if (gameIds.size() != 4) {
+                    log.error("Room {} has {} game(s) instead of 4 — cannot advance.", roomId, gameIds.size());
+                    return null;
+                }
+
                 org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(new org.springframework.transaction.support.TransactionSynchronization() {
                     @Override
                     public void afterCommit() {
-                        CompletableFuture<Void> g1 = roomAdvancementService.advanceGame(gameIds.get(0));
-                        CompletableFuture<Void> g2 = roomAdvancementService.advanceGame(gameIds.get(1));
-                        CompletableFuture<Void> g3 = roomAdvancementService.advanceGame(gameIds.get(2));
-                        CompletableFuture<Void> g4 = roomAdvancementService.advanceGame(gameIds.get(3));
+                        List<CompletableFuture<Void>> futures = gameIds.stream()
+                                .map(roomAdvancementService::advanceGame)
+                                .collect(java.util.stream.Collectors.toList());
 
-                        CompletableFuture.allOf(g1, g2, g3, g4).thenRun(() -> {
+                        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).thenRun(() -> {
                             log.info("All games in room {} advanced. Running post-turn cleanup.", roomId);
-                            // turnService is a different bean → @Transactional works correctly here
                             turnService.postAdvanceRoomTurn(roomId);
                         });
                     }

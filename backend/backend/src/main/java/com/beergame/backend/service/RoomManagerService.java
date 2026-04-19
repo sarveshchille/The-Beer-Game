@@ -233,28 +233,31 @@ public class RoomManagerService {
         // BUG 6 FIX: sort teams by teamName to make shuffle order deterministic.
         // JPA does not guarantee order from JOIN FETCH — without this, the
         // role-rotation formula (i+j)%4 produces inconsistent results across runs.
-        List<Team> teams = room.getTeams().stream()
+        List<Team> teamsList = room.getTeams().stream()
                 .sorted(java.util.Comparator.comparing(Team::getTeamName))
                 .collect(java.util.stream.Collectors.toList());
         for (int i = 0; i < 4; i++) {
             Game currentGame = newGames.get(i);
             for (int j = 0; j < 4; j++) {
-                Players.RoleType initialRole = roles[(i + j) % 4];
-                Players.RoleType newRole     = roles[j];
+                // j represents the role we are filling for Game i
+                Players.RoleType requiredRole = roles[j];
 
-                Players p = teams.get(j).getPlayers().stream()
-                        .filter(pl -> pl.getRole() == initialRole)
+                // Which team does this role come from in this game? (Deterministic offset)
+                int teamIndex = (i + j) % 4;
+                Team sourceTeam = teamsList.get(teamIndex);
+
+                Players p = sourceTeam.getPlayers().stream()
+                        .filter(pl -> pl.getRole() == requiredRole)
                         .findFirst()
-                        .orElseThrow(() -> new RuntimeException("Shuffle logic failed: player not found"));
+                        .orElseThrow(() -> new RuntimeException("Shuffle logic failed: team " + sourceTeam.getTeamName() + " missing role " + requiredRole));
 
                 p.setGame(currentGame);
-                p.setRole(newRole);
                 p.setInventory(GameConfig.INITIAL_INVENTORY);
                 p.setBackOrder(0);
                 p.setTotalCost(0);
                 p.setWeeklyCost(0);
 
-                if (newRole == Players.RoleType.RETAILER) {
+                if (requiredRole == Players.RoleType.RETAILER) {
                     p.setOrderArrivingNextWeek(
                             GameConfig.getCustomerDemand(1, currentGame.getFestiveWeeks()));
                 } else {

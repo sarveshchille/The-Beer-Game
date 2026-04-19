@@ -104,8 +104,11 @@ public class AfkDetectionService {
                 botService.calculateAndPlaceOrderAsync(game, afkPlayer, BotType.EASY, game.getCurrentWeek());
             }
             
-            // Lock this week so the next 40s cron tick ignores it while the async events resolve
-            redisTemplate.opsForValue().set(processedKey, "true", 7, TimeUnit.DAYS); 
+            // Lock this week so the next 40s cron tick ignores it while async events resolve.
+            // TTL = AFK_TIMEOUT_SECONDS + buffer — expires after one week cycle, NOT 7 days.
+            // Using 7 days was a bug: after week-1 AFK fired, every subsequent week was silently skipped.
+            redisTemplate.opsForValue().set(processedKey, "true",
+                    AFK_TIMEOUT_SECONDS + 30, TimeUnit.SECONDS);
         }
     }
 }
