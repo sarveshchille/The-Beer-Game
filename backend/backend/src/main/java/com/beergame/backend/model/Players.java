@@ -19,6 +19,8 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
+import lombok.ToString;
 
 // customer order             orderplacing
 // bavkorder                  
@@ -40,6 +42,8 @@ public class Players {
 
     @ManyToOne
     @JoinColumn(name = "playerInfoId", referencedColumnName = "id")
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
     private PlayerInfo playerInfo;
 
     @Column(name = "inventory")
@@ -80,10 +84,14 @@ public class Players {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "game_id")
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
     private Game game;
 
     @OneToMany(mappedBy = "player", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     @JsonIgnore
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
     private List<GameTurn> turnHistory = new ArrayList<>();
 
     @Enumerated(EnumType.STRING)
@@ -92,6 +100,8 @@ public class Players {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "initialTeamId")
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
     private Team initialTeam;
 
     @Column(name = "is_bot")

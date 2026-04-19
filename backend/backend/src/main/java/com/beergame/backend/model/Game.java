@@ -8,6 +8,8 @@ import java.util.Set;
 
 import jakarta.persistence.*;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
+import lombok.ToString;
 
 /**
  * Changes:
@@ -52,6 +54,8 @@ public class Game {
     private LocalDateTime finishedAt;
 
     @OneToMany(mappedBy = "game", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
     private List<Players> players = new ArrayList<>();
 
     /** Whether the CURRENT week is a festive week (drives UI highlight). */
@@ -70,6 +74,8 @@ private Set<Integer> festiveWeeks = new HashSet<>();
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "gameRoomId")
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
     private GameRoom gameRoom;
 
     public enum GameStatus {
