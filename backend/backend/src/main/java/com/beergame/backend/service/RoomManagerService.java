@@ -1,12 +1,16 @@
 package com.beergame.backend.service;
 
 import com.beergame.backend.config.GameConfig;
+import com.beergame.backend.event.WeekStartedEvent;
 import com.beergame.backend.model.*;
 import com.beergame.backend.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
@@ -35,6 +39,7 @@ public class RoomManagerService {
     private final GameRepository       gameRepository;
     private final BroadcastService     broadcastService;
     private final RedisLockService     redisLockService;
+    private final ApplicationEventPublisher eventPublisher;
 
     private static final String        ALPHANUMERIC = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     private static final SecureRandom  RANDOM       = new SecureRandom();
@@ -238,5 +243,18 @@ public class RoomManagerService {
 
         // FIX: was a direct broadcastRoomState() mid-transaction.
         broadcastService.broadcastRoomAfterCommit(room.getId());
+
+        // Publish WeekStartedEvent for each game AFTER commit so the AFK timer
+        // is correctly armed. Without this the AFK scheduler sees no Redis key
+        // and immediately treats all 16 players as AFK on its first 40s tick.
+        final List<Game> committedGames = new ArrayList<>(newGames);
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                for (Game g : committedGames) {
+                    eventPublisher.publishEvent(new WeekStartedEvent(RoomManagerService.this, g.getId(), 1));
+                }
+            }
+        });
     }
 }
