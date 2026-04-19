@@ -273,14 +273,16 @@ public class RoomManagerService {
 
         // Immediately broadcast RUNNING state directly from memory to bypass transactional race conditions
         broadcastService.broadcastRoomState(room.getId(), room);
-        // Publish WeekStartedEvent for each game AFTER commit so the AFK timer
-        // is correctly armed. Without this the AFK scheduler sees no Redis key
-        // and immediately treats all 16 players as AFK on its first 40s tick.
+        
+        // Publish WeekStartedEvent and Broadcast Game states for each game AFTER commit
         final List<Game> committedGames = new ArrayList<>(newGames);
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
                 for (Game g : committedGames) {
+                    // This explicitly pushes the GameStateDTO data to /topic/game/{gameId}
+                    // so the DashBoard.jsx immediately drops the loading screen and shows their stats!
+                    broadcastService.broadcastGameAfterCommit(g.getId());
                     eventPublisher.publishEvent(new WeekStartedEvent(RoomManagerService.this, g.getId(), 1));
                 }
             }
