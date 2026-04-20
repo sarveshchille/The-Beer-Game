@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import org.springframework.context.event.EventListener;
 import com.beergame.backend.event.GameFinishedEvent;
@@ -21,17 +22,19 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class BotService {
 
     private final RestTemplate restTemplate;
-    
-    @Lazy
     private final OrderService orderService;
-
-    @Lazy
     private final GameService gameService;
+
+    @Autowired
+    public BotService(RestTemplate restTemplate, @Lazy OrderService orderService, @Lazy GameService gameService) {
+        this.restTemplate = restTemplate;
+        this.orderService = orderService;
+        this.gameService = gameService;
+    }
 
     @Value("${bot.service.url}")
     private String botServiceUrl;
