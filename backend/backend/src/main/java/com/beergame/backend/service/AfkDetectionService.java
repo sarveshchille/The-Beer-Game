@@ -59,7 +59,7 @@ public class AfkDetectionService {
         redisTemplate.delete(AFK_KEY_PREFIX + gameId + ":" + week);
     }
 
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void onWeekStarted(WeekStartedEvent event) {
         String key = AFK_KEY_PREFIX + event.getGameId() + ":" + event.getWeek();
         redisTemplate.opsForValue()

@@ -10,6 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -164,10 +165,25 @@ public class TurnService {
 
         gameRepository.save(game);
 
-         if (game.getGameStatus() == Game.GameStatus.IN_PROGRESS) {
-              eventPublisher.publishEvent(
-            new WeekStartedEvent(this, gameId, game.getCurrentWeek()));
-        }
+        // Capture final values for the lambda before registerSynchronization
+        final boolean gameStillRunning = game.getGameStatus() == Game.GameStatus.IN_PROGRESS;
+        final int nextWeek = game.getCurrentWeek();
+        final String capturedGameId = gameId;
+
+        // Publish WeekStartedEvent AFTER commit so the AFK timer is only armed
+        // once the turn data is safely persisted. If published mid-transaction
+        // and the transaction rolls back, the event would have fired for a week
+        // that was never written — leaving orphaned AFK keys in Redis.
+        TransactionSynchronizationManager.registerSynchronization(
+                new org.springframework.transaction.support.TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        if (gameStillRunning) {
+                            eventPublisher.publishEvent(
+                                    new WeekStartedEvent(TurnService.this, capturedGameId, nextWeek));
+                        }
+                    }
+                });
 
         // Broadcast AFTER this transaction commits so clients always see
         // consistent, fully-written state.

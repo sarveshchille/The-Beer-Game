@@ -113,7 +113,7 @@ public class GameService {
     }
 
     @Async
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void triggerBotsOnWeekStart(WeekStartedEvent event) {
         // 1. Fetch game WITHOUT taking the lock
