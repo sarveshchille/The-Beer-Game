@@ -19,7 +19,7 @@ public class GameSocketController {
     private final GameService gameService;
 
     @MessageMapping("/game/{gameId}/placeOrder")
-    public void placeOrder(@DestinationVariable String gameId,
+    public void placeOrder(@DestinationVariable("gameId") String gameId,
             @Payload OrderPayloadDTO payload,
             Principal principal) {
 
@@ -34,7 +34,7 @@ public class GameSocketController {
     }
 
     @MessageMapping("/room/{roomId}/placeOrder")
-    public void placeRoomOrder(@DestinationVariable String roomId,
+    public void placeRoomOrder(@DestinationVariable("roomId") String roomId,
             @Payload OrderPayloadDTO payload,
             Principal principal) {
 
