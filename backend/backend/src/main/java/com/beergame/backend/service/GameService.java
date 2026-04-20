@@ -313,6 +313,14 @@ public class GameService {
      * consistent data.
      */
     public void placeOrder(String gameId, String username, int orderAmount) {
+        Game game = gameRepository.findById(gameId)
+                .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
+        
+        if (game.getGameRoom() != null) {
+            submitRoomOrder(game.getGameRoom().getId(), username, orderAmount);
+            return;
+        }
+        
         orderService.placeOrder(gameId, username, orderAmount, null);
     }
 
@@ -364,6 +372,7 @@ public class GameService {
                     // FIX: was calling broadcastRoomState() mid-transaction (before commit).
                     // Now we wait until after commit so clients see consistent DB state.
                     broadcastService.broadcastRoomAfterCommit(roomId);
+                    broadcastService.broadcastGameAfterCommit(player.getGame().getId());
                     return null;
                 }
 

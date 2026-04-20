@@ -27,6 +27,9 @@ public class BotService {
     @Lazy
     private final OrderService orderService;
 
+    @Lazy
+    private final GameService gameService;
+
     @Value("${bot.service.url}")
     private String botServiceUrl;
 
@@ -36,7 +39,11 @@ public class BotService {
     @Async
     public void calculateAndPlaceOrderAsync(Game game, Players botPlayer, BotType activeBotType, int targetWeek) {
         int order = calculateOrder(game, botPlayer, activeBotType);
-        orderService.placeOrder(game.getId(), botPlayer.getUserName(), order, targetWeek);
+        if (game.getGameRoom() != null) {
+            gameService.submitRoomOrder(game.getGameRoom().getId(), botPlayer.getUserName(), order);
+        } else {
+            orderService.placeOrder(game.getId(), botPlayer.getUserName(), order, targetWeek);
+        }
     }
 
     @Async
