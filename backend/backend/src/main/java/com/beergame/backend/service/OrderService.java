@@ -80,7 +80,7 @@ public class OrderService {
                     log.info("All players ready for game {}. Advancing turn.", gameId);
                     eventPublisher.publishEvent(
                             new AllPlayersReadyEvent(this, gameId, game.getCurrentWeek()));
-                    turnService.advanceTurn(gameId);
+                    turnService.advanceTurn(game);
                 } else {
                     broadcastService.broadcastGameAfterCommit(gameId);
                 }

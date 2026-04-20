@@ -1,6 +1,7 @@
 package com.beergame.backend.dto;
 
 import com.beergame.backend.model.Players;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 public record PlayerStateDTO(
         Long id,
@@ -12,9 +13,9 @@ public record PlayerStateDTO(
         int incomingShipment,
         double weeklyCost,
         double totalCost,
-        boolean isReadyForNextTurn,
+        @JsonProperty("readyForNextTurn") boolean isReadyForNextTurn,
         int lastOrderReceived,
-        String gameId // 👈 1. ADD THIS FIELD (The Golden Key)
+        String gameId
 ) {
     public static PlayerStateDTO fromPlayer(Players player) {
         return new PlayerStateDTO(

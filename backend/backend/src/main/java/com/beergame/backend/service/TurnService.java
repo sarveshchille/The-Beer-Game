@@ -50,8 +50,23 @@ public class TurnService {
      */
     @Transactional
     public void advanceTurn(String gameId) {
+        // Backward-compatible overload: fetches game from DB
         Game game = gameRepository.findByIdWithPlayers(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
+        advanceTurn(game);
+    }
+
+    /**
+     * Overload that accepts a pre-loaded Game object.
+     * 
+     * CRITICAL FIX: OrderService already has the Game with the 4th player's
+     * readyForOrder=true set in memory. If we re-fetch from DB here, Hibernate
+     * might return a stale snapshot where that player is still false, causing
+     * the turn to silently fail to advance.
+     */
+    @Transactional
+    public void advanceTurn(Game game) {
+        String gameId = game.getId();
 
         if (game.getPlayers() == null || game.getPlayers().isEmpty()) {
             log.warn("Tried to advance game {} with no players.", gameId);
