@@ -11,6 +11,9 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.context.annotation.Lazy;
 
+import org.springframework.context.event.EventListener;
+import com.beergame.backend.event.GameFinishedEvent;
+
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -52,6 +55,19 @@ public class BotService {
             restTemplate.getForEntity(botServiceUrl + "/docs", String.class);
         } catch (Exception e) {
             log.trace("Pinged bot service.");
+        }
+    }
+
+    @Async
+    @EventListener
+    public void onGameFinished(GameFinishedEvent event) {
+        try {
+            Map<String, String> payload = new HashMap<>();
+            payload.put("game_id", event.getGameId());
+            restTemplate.postForObject(botServiceUrl + "/end_game", payload, Map.class);
+            log.info("Cleared memory for game {} in ML service.", event.getGameId());
+        } catch (Exception e) {
+            log.warn("Failed to clear ML memory for game {}: {}", event.getGameId(), e.getMessage());
         }
     }
 

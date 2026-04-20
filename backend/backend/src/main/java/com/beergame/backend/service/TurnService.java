@@ -2,6 +2,7 @@ package com.beergame.backend.service;
 
 import com.beergame.backend.config.GameConfig;
 import com.beergame.backend.event.WeekStartedEvent;
+import com.beergame.backend.event.GameFinishedEvent;
 import com.beergame.backend.model.*;
 import com.beergame.backend.repository.*;
 import lombok.RequiredArgsConstructor;
@@ -171,6 +172,7 @@ public class TurnService {
             game.setFinishedAt(LocalDateTime.now());
             game.setFestiveWeek(false);
             log.info("Game {} FINISHED after week {}.", gameId, currentWeek);
+            eventPublisher.publishEvent(new GameFinishedEvent(this, gameId));
         } else {
             boolean festive = GameConfig.isFestiveWeek(game.getCurrentWeek(), game.getFestiveWeeks());
             game.setFestiveWeek(festive);
