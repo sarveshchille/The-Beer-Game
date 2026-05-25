@@ -37,36 +37,20 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Changes from the original:
- *
- * 1. synchronized(gameId.intern()) → RedisLockService (cluster-safe).
- * 2. advanceTurn / postAdvanceRoomTurn moved to TurnService so Spring's proxy
- * intercepts @Transactional (self-invocation bypass fixed; @Lazy self gone).
- * 3. broadcast methods moved to BroadcastService (no circular deps).
- * 4. placeOrder: only registers ONE broadcast — either intermediate state OR
- * lets advanceTurn register it, never both.
- * 5. submitRoomOrder: intermediate broadcast is now post-commit safe.
- * 6. generateUniqueGameId: bounded retry loop with clear error on exhaustion.
- * 7. joinGame: uses game.getCurrentWeek() instead of hardcoded 1 for retailer.
- * 8. placeOrder: order amount validated with upper bound.
- * 9. Game entity now has @Version (optimistic locking) — see Game.java.
- * 10. Batch saves (saveAll) are handled inside TurnService.
+ * Service class handling Game lifecycle operations.
  */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class GameService {
 
-    // ── Maximum order a player may place in one turn ──────────────────────────
     // Prevents accidental or malicious integer overflow / runaway costs.
     public static final int MAX_ORDER_AMOUNT = 9_999;
 
-    // ── ID generation ─────────────────────────────────────────────────────────
     private static final int MAX_ID_RETRIES = 10;
     private static final String ALPHANUMERIC = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     private static final SecureRandom RANDOM = new SecureRandom();
 
-    // ── Dependencies ──────────────────────────────────────────────────────────
     private final GameRepository gameRepository;
     private final PlayerRepository playerRepository;
     private final PlayerInfoRepository playerInfoRepository;
@@ -74,7 +58,6 @@ public class GameService {
     private final GameRoomRepository gameRoomRepository;
     private final RoomAdvancementService roomAdvancementService;
 
-    // New extracted services
     private final RedisLockService redisLockService;
     private final TurnService turnService;
     private final BroadcastService broadcastService;
@@ -83,9 +66,6 @@ public class GameService {
     private final OrderService orderService;
     private final org.springframework.transaction.support.TransactionTemplate transactionTemplate;
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Helpers
-    // ─────────────────────────────────────────────────────────────────────────
 
     private String generateRandomId(int length) {
         StringBuilder sb = new StringBuilder(length);
@@ -183,9 +163,6 @@ public class GameService {
         });
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Game lifecycle
-    // ─────────────────────────────────────────────────────────────────────────
 
     /**
      * Creates a new game lobby.
@@ -259,8 +236,6 @@ public class GameService {
             player.setTotalCost(0);
             player.setReadyForOrder(false);
 
-            // FIX: use the game's actual currentWeek, not hardcoded 1.
-            // (Matters if, e.g., a player reconnects mid-game to a saved lobby.)
             int currentWeek = game.getCurrentWeek();
             if (role == Players.RoleType.RETAILER) {
                 player.setOrderArrivingNextWeek(GameConfig.getCustomerDemand(currentWeek, game.getFestiveWeeks()));
@@ -292,9 +267,6 @@ public class GameService {
         });
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Single-game order placement
-    // ─────────────────────────────────────────────────────────────────────────
 
     /**
      * Records a player's order for the current week.
@@ -324,19 +296,15 @@ public class GameService {
         orderService.placeOrder(gameId, username, orderAmount, null);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Room-mode order placement
-    // ─────────────────────────────────────────────────────────────────────────
 
     /**
      * Records a player's order in room mode.
      *
-     * FIX: intermediate state is now broadcast post-commit (not mid-transaction).
+     * Records a player's order in room mode.
      */
     public void submitRoomOrder(String roomId, String username, int orderAmount) {
         redisLockService.executeWithLock(roomId, 10, () -> {
             return transactionTemplate.execute(status -> {
-                // ── Validate ──────────────────────────────────────────────────────────
                 if (orderAmount < 0 || orderAmount > MAX_ORDER_AMOUNT) {
                     throw new IllegalArgumentException(
                             "Order amount must be 0–" + MAX_ORDER_AMOUNT + ", got: " + orderAmount);
@@ -369,8 +337,7 @@ public class GameService {
                         .allMatch(Players::isReadyForOrder);
 
                 if (!allReady) {
-                    // FIX: was calling broadcastRoomState() mid-transaction (before commit).
-                    // Now we wait until after commit so clients see consistent DB state.
+                    // Wait until after commit so clients see consistent DB state.
                     broadcastService.broadcastRoomAfterCommit(roomId);
                     broadcastService.broadcastGameAfterCommit(player.getGame().getId());
                     return null;
@@ -403,9 +370,6 @@ public class GameService {
         });
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Queries
-    // ─────────────────────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
     public Map<String, List<GameTurnHistoryDTO>> getGameHistory(String gameId) {
@@ -432,9 +396,6 @@ public class GameService {
         return response;
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Public broadcast delegate (used by GameController response path)
-    // ─────────────────────────────────────────────────────────────────────────
 
     /**
      * Convenience passthrough so callers that already have a Game object don't

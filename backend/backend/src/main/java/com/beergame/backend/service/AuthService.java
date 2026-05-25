@@ -33,9 +33,7 @@ public class AuthService {
     private final AuthenticationManager authenticationManager;
     private final JwtUtils             jwtUtils;
 
-    // FIX: Math.random() is not cryptographically secure — replaced with
-    // SecureRandom. An attacker who can observe the seed or timing of
-    // Math.random() can predict future OTPs. SecureRandom uses OS entropy.
+    // Use SecureRandom for cryptographically secure OTP generation.
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     public RegisterResponseDTO registerBeforeEmail(LoginDTO loginDTO) {
@@ -46,7 +44,6 @@ public class AuthService {
             throw new EmailIdAlreadyExistsException("Email already registered");
         }
 
-        // FIX: was Math.random() — now SecureRandom
         int token = 100_000 + SECURE_RANDOM.nextInt(900_000);
         log.info("OTP generated for {} : {}", loginDTO.email(), token);
 
@@ -76,15 +73,7 @@ public class AuthService {
 
     public String login(LoginDTO loginDTO) {
         // authenticationManager.authenticate() already throws
-        // BadCredentialsException if the user does not exist or the password
-        // is wrong — GlobalExceptionHandler maps that to HTTP 401.
-        //
-        // FIX: removed the dead-code block:
-        //   if (playerInfoRepository.existsByUserName(...)) { return jwt; }
-        //   else { throw new UserDoesNotExistException(); }
-        // That branch was unreachable: if authenticate() succeeds the user
-        // must exist, so existsByUserName is always true and the else
-        // branch can never fire. It also added a pointless extra DB round-trip.
+        // BadCredentialsException if credentials are invalid.
         Authentication authentication = authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(loginDTO.username(), loginDTO.password()));
 

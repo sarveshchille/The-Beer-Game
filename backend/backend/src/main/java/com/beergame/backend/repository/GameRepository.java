@@ -12,13 +12,7 @@ import java.util.Optional;
 public interface GameRepository extends JpaRepository<Game, String> {
 
     /**
-     * FIX: original signature was findByGameStatusAndCreatedAt(status, dateTime)
-     * which matches an EXACT timestamp — almost never returns results and was
-     * therefore useless for the cleanup job.
-     *
-     * Renamed to findByGameStatusAndCreatedAtBefore so Spring generates
-     * WHERE game_status = ? AND created_at < ? which is what CleanupService
-     * actually needs.
+     * Finds games by status and created before a certain timestamp.
      */
     List<Game> findByGameStatusAndCreatedAtBefore(Game.GameStatus status, LocalDateTime cutoff);
 

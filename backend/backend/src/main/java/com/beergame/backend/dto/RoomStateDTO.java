@@ -22,7 +22,6 @@ public class RoomStateDTO {
     /** Structured team list — each entry shows members + still-open roles. */
     private List<TeamSlotDTO> teams;
 
-    // ─── Nested DTO ────────────────────────────────────────────────────────────
 
     @Data
     public static class TeamSlotDTO {
@@ -32,7 +31,6 @@ public class RoomStateDTO {
         private List<Players.RoleType> availableRoles;
     }
 
-    // ─── Factory ───────────────────────────────────────────────────────────────
 
     public static RoomStateDTO fromGameRoom(GameRoom room) {
         RoomStateDTO dto = new RoomStateDTO();

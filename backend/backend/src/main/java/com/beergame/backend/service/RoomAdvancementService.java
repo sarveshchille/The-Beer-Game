@@ -9,11 +9,6 @@ import java.util.concurrent.CompletableFuture;
 /**
  * Runs individual game advances asynchronously so all four games in a room
  * advance in parallel rather than sequentially.
- *
- * Change from original:
- *   Was: injected GameService via @Lazy to avoid circular dep with GameService
- *        → RoomAdvancementService → GameService.
- *   Now: injects TurnService directly — no cycle, no @Lazy needed.
  */
 @Service
 @Slf4j

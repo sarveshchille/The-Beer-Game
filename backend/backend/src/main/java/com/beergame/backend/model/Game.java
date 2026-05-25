@@ -13,20 +13,7 @@ import lombok.EqualsAndHashCode;
 import lombok.ToString;
 
 /**
- * Changes:
- *  1. @Version for optimistic locking.
- *  2. festiveWeeks stored per-game as @ElementCollection — every game now
- *     gets its own independently-generated festive weeks. Previously all games
- *     shared the JVM-global static Set in GameConfig, making every game
- *     identically predictable.
- *
- * MIGRATION:
- *   ALTER TABLE Game ADD COLUMN version BIGINT DEFAULT 0;
- *   CREATE TABLE game_festive_weeks (
- *       game_id    VARCHAR(10) NOT NULL,
- *       festive_week INT       NOT NULL,
- *       FOREIGN KEY (game_id) REFERENCES Game(id)
- *   );
+ * Entity representing a Game.
  */
 @Data
 @Entity

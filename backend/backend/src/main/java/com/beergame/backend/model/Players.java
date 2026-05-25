@@ -22,12 +22,6 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.ToString;
 
-// customer order             orderplacing
-// bavkorder                  
-// inventory
-// incoming shipment
-// outgoing delivery
-// weeklycost
 @Data
 @Entity
 @Table(name = "players")

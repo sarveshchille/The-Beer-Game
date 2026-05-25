@@ -13,11 +13,10 @@ public class RoomStateSubscriber {
 
     private final SimpMessagingTemplate messagingTemplate;
 
-    // This method is called by the 'roomListenerAdapter'
     public void receiveMessage(RoomStateDTO roomState) {
         try {
-            String roomId = roomState.getRoomId(); // Assumes RoomStateDTO has getRoomId()
-            String topic = "/topic/room/" + roomId; // 👈 Make sure your frontend listens here
+            String roomId = roomState.getRoomId();
+            String topic = "/topic/room/" + roomId;
 
             log.info("Received room state from Redis. Broadcasting to WebSocket topic: {}", topic);
 

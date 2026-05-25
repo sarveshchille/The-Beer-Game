@@ -49,10 +49,7 @@ public class OrderService {
                     return null;
                 }
 
-                // 🚨 FIX: Extract player directly from the fetched collection!
-                // If we use playerRepository.findByGameAndUserName, Hibernate might return
-                // a different object reference, leaving the instance inside game.getPlayers() stale.
-                // This caused allReady to erroneously evaluate to false, stranding the game in Week 1.
+                // Extract player directly from the fetched collection.
                 Players player = game.getPlayers().stream()
                         .filter(p -> p.getUserName().equals(username))
                         .findFirst()

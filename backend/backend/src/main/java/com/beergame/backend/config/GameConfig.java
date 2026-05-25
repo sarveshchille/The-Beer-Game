@@ -8,35 +8,18 @@ import java.util.Set;
 
 /**
  * Holds all the static rules, costs, and demand schedule for the game.
- *
- * CHANGE: Removed the JVM-global static FESTIVE_WEEKS Set.
- *
- * The old design picked 3 random weeks ONCE when the class was loaded by the
- * JVM. Every game created in that JVM session had identical festive weeks,
- * which makes all concurrent games predictable and defeats the randomness
- * entirely.
- *
- * New design:
- *  - generateFestiveWeeks() creates a fresh random set for each game.
- *  - isFestiveWeek(week, festiveWeeks) and getCustomerDemand(week, festiveWeeks)
- *    accept the game-specific set as a parameter.
- *  - The old 0-argument versions are retained as deprecated so nothing breaks
- *    during migration.
  */
 public class GameConfig {
 
-    // ── Game rules ────────────────────────────────────────────────────────────
     public static final int    GAME_WEEKS             = 25;
     public static final int    INITIAL_INVENTORY      = 150;
     public static final int    INITIAL_PIPELINE_LEVEL = 20;
 
-    // ── Cost rules ────────────────────────────────────────────────────────────
     public static final double INVENTORY_HOLDING_COST = 0.75;
     public static final double BACKORDER_COST         = 1.50;
 
     private static final SecureRandom RANDOM = new SecureRandom();
 
-    // ── Demand schedule ───────────────────────────────────────────────────────
     private static final int[] BASE_DEMAND_SCHEDULE = {
             // Weeks  1   2   3   4   5   6   7   8   9  10  11  12  13
                      20, 30, 40, 40, 40, 40, 60, 60, 60, 80, 80, 80, 60,
@@ -44,7 +27,6 @@ public class GameConfig {
                      60, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80
     };
 
-    // ── Festive week generation ───────────────────────────────────────────────
 
     /**
      * Generates a new set of 3 unique random festive weeks in range [6, 22].
@@ -59,7 +41,6 @@ public class GameConfig {
         return festiveWeeks;
     }
 
-    // ── Per-game demand / festivity queries ───────────────────────────────────
 
     /**
      * Returns the customer demand for the retailer in {@code week},

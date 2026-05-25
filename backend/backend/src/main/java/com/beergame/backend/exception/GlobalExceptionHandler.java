@@ -32,7 +32,6 @@ import java.util.stream.Collectors;
 @Slf4j
 public class GlobalExceptionHandler {
 
-    // ── Domain exceptions ─────────────────────────────────────────────────────
 
     @ExceptionHandler(UserNameAlreadyExistsException.class)
     public ResponseEntity<Map<String, Object>> handleUsernameConflict(UserNameAlreadyExistsException ex) {
@@ -49,7 +48,6 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.NOT_FOUND, "User not found");
     }
 
-    // ── Security ──────────────────────────────────────────────────────────────
 
     @ExceptionHandler(BadCredentialsException.class)
     public ResponseEntity<Map<String, Object>> handleBadCredentials(BadCredentialsException ex) {
@@ -57,7 +55,6 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.UNAUTHORIZED, "Invalid username or password");
     }
 
-    // ── Game-logic RuntimeExceptions ──────────────────────────────────────────
     // These are thrown with descriptive messages from the service layer.
 
     @ExceptionHandler(IllegalArgumentException.class)
@@ -93,7 +90,6 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.BAD_REQUEST, msg);
     }
 
-    // ── Optimistic locking ────────────────────────────────────────────────────
 
     /**
      * Thrown when two concurrent advanceTurn() calls try to commit the same
@@ -105,7 +101,6 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.CONFLICT, "Game state changed concurrently — please retry");
     }
 
-    // ── Validation (@Valid) ───────────────────────────────────────────────────
 
     /**
      * Triggered when a request body fails @Valid Bean Validation.
@@ -129,7 +124,6 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
     }
 
-    // ── Builder ───────────────────────────────────────────────────────────────
 
     private ResponseEntity<Map<String, Object>> build(HttpStatus status, String message) {
         Map<String, Object> body = new HashMap<>();

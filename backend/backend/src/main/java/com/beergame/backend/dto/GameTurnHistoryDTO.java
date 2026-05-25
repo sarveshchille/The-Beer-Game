@@ -4,7 +4,7 @@ import com.beergame.backend.model.GameTurn;
 
 public record GameTurnHistoryDTO(
         int weekDay,
-        int demandRecieved, // keep same spelling as entity
+        int demandRecieved,
         int orderPlaced,
         int shipmentSent,
         int shipmentRecieved,

@@ -21,12 +21,6 @@ import java.util.stream.Collectors;
 
 /**
  * Handles game-turn advancement logic.
- *
- * WHY a separate bean?
- * When advanceTurn() was in GameService and called via `this.advanceTurn()`,
- * Spring's proxy was bypassed — meaning @Transactional had no effect. Moving
- * it here means every call goes through the proxy and transaction semantics
- * are respected. The `self` injection hack is no longer needed anywhere.
  */
 @Service
 @RequiredArgsConstructor
@@ -51,7 +45,6 @@ public class TurnService {
      */
     @Transactional
     public void advanceTurn(String gameId) {
-        // Backward-compatible overload: fetches game from DB
         Game game = gameRepository.findByIdWithPlayers(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found: " + gameId));
         advanceTurn(game);
@@ -59,11 +52,6 @@ public class TurnService {
 
     /**
      * Overload that accepts a pre-loaded Game object.
-     * 
-     * CRITICAL FIX: OrderService already has the Game with the 4th player's
-     * readyForOrder=true set in memory. If we re-fetch from DB here, Hibernate
-     * might return a stale snapshot where that player is still false, causing
-     * the turn to silently fail to advance.
      */
     @Transactional
     public void advanceTurn(Game game) {
@@ -89,7 +77,6 @@ public class TurnService {
             return;
         }
 
-        // ── Loop 1: receive shipments, fulfil orders, calculate costs ──────────
         for (Players p : game.getPlayers()) {
             // Receive shipment that was on its way
             int shipmentReceived = p.getIncomingShipment();
@@ -131,7 +118,6 @@ public class TurnService {
             p.setTotalCost(p.getTotalCost() + p.getWeeklyCost());
         }
 
-        // ── Loop 2: propagate orders down the supply chain ────────────────────
         wholesaler.setOrderArrivingNextWeek(retailer.getCurrentOrder());
         distributor.setOrderArrivingNextWeek(wholesaler.getCurrentOrder());
         manufacturer.setOrderArrivingNextWeek(distributor.getCurrentOrder());
@@ -141,7 +127,6 @@ public class TurnService {
         wholesaler.setShipmentArrivingWeekAfterNext(distributor.getOutgoingDelivery());
         retailer.setShipmentArrivingWeekAfterNext(wholesaler.getOutgoingDelivery());
 
-        // ── Loop 3: record history, reset ready flag ───────────────────────────
         // Build all GameTurn records in memory, then batch-insert in one call.
         List<GameTurn> turns = game.getPlayers().stream().map(p -> {
             GameTurn turn = new GameTurn();
@@ -164,7 +149,6 @@ public class TurnService {
         gameTurnRepository.saveAll(turns);
         playerRepository.saveAll(game.getPlayers());
 
-        // ── Advance week counter and check game-over ───────────────────────────
         game.setCurrentWeek(currentWeek + 1);
 
         if (game.getCurrentWeek() > GameConfig.GAME_WEEKS) {

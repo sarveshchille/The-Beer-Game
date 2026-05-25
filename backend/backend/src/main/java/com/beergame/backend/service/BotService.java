@@ -78,7 +78,6 @@ public class BotService {
         return calculateOrder(game, botPlayer, botPlayer.getBotType());
     }
 
- // BotService.java - run in a separate thread with a hard timeout
 public int calculateOrder(Game game, Players botPlayer, BotType activeBotType) {
     String endpoint = resolveEndpoint(activeBotType);
     Map<String, Object> payload = buildPayload(game, botPlayer);

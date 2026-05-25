@@ -17,14 +17,7 @@ public interface PlayerRepository extends JpaRepository<Players, Long> {
         Optional<Players> findByGameAndPlayerInfoUserName(Game game, String userName);
 
         /**
-         * FIX: Query by game ID string directly.
-         *
-         * The old pattern required a full Game entity to be passed in just to
-         * filter by its ID. This adds zero safety (Spring still generates the
-         * same WHERE game_id = ? clause) but forces callers to load or hold a
-         * Game object unnecessarily, creating an N+1 opportunity.
-         *
-         * Use this version when you only have a gameId string available.
+         * Query by game ID string directly.
          */
         @Query("""
                         SELECT p FROM Players p
@@ -36,6 +29,5 @@ public interface PlayerRepository extends JpaRepository<Players, Long> {
                         @Param("gameId") String gameId,
                         @Param("username") String username);
 
-        // Add this new method
         Optional<Players> findByGameAndUserName(Game game, String userName);
 }

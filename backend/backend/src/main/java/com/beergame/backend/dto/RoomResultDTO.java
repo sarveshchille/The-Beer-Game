@@ -28,7 +28,6 @@ public class RoomResultDTO {
     /** All 4 teams ranked by total cost ascending (lowest = best). */
     private List<TeamResultDTO> leaderboard;
 
-    // ── Nested DTOs ────────────────────────────────────────────────────────
 
     @Data
     public static class TeamResultDTO {
@@ -51,7 +50,6 @@ public class RoomResultDTO {
         private String historyUrl;
     }
 
-    // ── Factory ────────────────────────────────────────────────────────────
 
     /**
      * Builds the result from a FINISHED GameRoom.

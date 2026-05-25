@@ -9,16 +9,6 @@ import org.springframework.stereotype.Service;
 /**
  * Receives deserialised GameStateDTO from the Redis listener adapter and
  * forwards it to the correct WebSocket topic.
- *
- * FIX: The original class implemented MessageListener and overrode onMessage(),
- * which caused every Redis message to be processed TWICE:
- *   1. MessageListenerAdapter calls receiveMessage(GameStateDTO) directly
- *      (after deserialising the bytes using Jackson2JsonRedisSerializer).
- *   2. The onMessage() override also fired, deserialised the raw bytes a
- *      second time, and called receiveMessage() again.
- *
- * Solution: drop the MessageListener implementation entirely. The adapter
- * handles all deserialisation and calls receiveMessage() once.
  */
 @Service
 @RequiredArgsConstructor

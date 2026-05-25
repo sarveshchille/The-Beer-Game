@@ -30,7 +30,6 @@ public record PlayerStateDTO(
                 player.getTotalCost(),
                 player.isReadyForOrder(),
                 player.getLastOrderReceived(),
-                // 👈 2. SAFELY GET THE GAME ID
                 (player.getGame() != null) ? player.getGame().getId() : null);
     }
 }

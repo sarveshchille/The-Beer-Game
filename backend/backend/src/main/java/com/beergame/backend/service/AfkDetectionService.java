@@ -44,7 +44,6 @@ public class AfkDetectionService {
     private static final String AFK_KEY_PREFIX  = "afk:";
 
 
-    // Listens for AllPlayersReadyEvent — no longer needs GameService to clear timer
     @EventListener
     public void onAllPlayersReady(AllPlayersReadyEvent event) {
         clearWeekTimer(event.getGameId(), event.getWeek());
@@ -74,15 +73,13 @@ public class AfkDetectionService {
      */
     @Scheduled(fixedRate = 40_000)
     public void checkAfkPlayers() {
-        // FIX 1: Use the JOIN FETCH repository method
         List<Game> activeGames = gameRepository
                 .findActiveGamesWithPlayers(Game.GameStatus.IN_PROGRESS);
 
         for (Game game : activeGames) {
-            // FIX 2: Check if we've already processed AFK orders for this specific week
             String processedKey = "afk_processed:" + game.getId() + ":" + game.getCurrentWeek();
             if (Boolean.TRUE.equals(redisTemplate.hasKey(processedKey))) {
-                continue; // Async events are already handling this week
+                continue;
             }
 
             String key = AFK_KEY_PREFIX + game.getId() + ":" + game.getCurrentWeek();
@@ -104,9 +101,6 @@ public class AfkDetectionService {
                 botService.calculateAndPlaceOrderAsync(game, afkPlayer, BotType.EASY, game.getCurrentWeek());
             }
             
-            // Lock this week so the next 40s cron tick ignores it while async events resolve.
-            // TTL = AFK_TIMEOUT_SECONDS + buffer — expires after one week cycle, NOT 7 days.
-            // Using 7 days was a bug: after week-1 AFK fired, every subsequent week was silently skipped.
             redisTemplate.opsForValue().set(processedKey, "true",
                     AFK_TIMEOUT_SECONDS + 30, TimeUnit.SECONDS);
         }

@@ -34,9 +34,6 @@ public class BroadcastService {
     private final GameRepository     gameRepository;
     private final GameRoomRepository gameRoomRepository;
 
-    // ───────────────────────────────────────────────────────────────────── //
-    //  Game broadcasts
-    // ───────────────────────────────────────────────────────────────────── //
 
     public void broadcastGameState(Game game) {
         GameStateDTO dto    = GameStateDTO.fromGame(game);
@@ -72,9 +69,6 @@ public class BroadcastService {
         });
     }
 
-    // ───────────────────────────────────────────────────────────────────── //
-    //  Room broadcasts
-    // ───────────────────────────────────────────────────────────────────── //
 
     public void broadcastRoomState(String roomId, GameRoom room) {
         RoomStateDTO dto     = RoomStateDTO.fromGameRoom(room);
@@ -107,9 +101,6 @@ public class BroadcastService {
         });
     }
 
-    // ───────────────────────────────────────────────────────────────────── //
-    //  Room result broadcast (fired once when room is FINISHED)
-    // ───────────────────────────────────────────────────────────────────── //
 
     /**
      * Publishes the winner announcement + full leaderboard on a dedicated Redis

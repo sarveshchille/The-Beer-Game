@@ -29,19 +29,12 @@ public class GameController {
             return ResponseEntity.status(401).build();
         }
 
-        // Step 1: create empty game
         Game newGame = gameService.createGame(userDetails.getUsername());
 
-        // Step 2: creator joins as the first player.
-        // THIS CALL SAVES THE PLAYER AND RETURNS THE UPDATED GAME.
         Game updatedGame = gameService.joinGame(
                 newGame.getId(),
                 userDetails.getUsername(),
                 request.role());
-
-        // Step 3: Return the game state *from the joinGame call*.
-        // This state is guaranteed to have the creator in it.
-        // This fixes the "0/4 players" bug.
         return ResponseEntity.ok(GameStateDTO.fromGame(updatedGame));
     }
 

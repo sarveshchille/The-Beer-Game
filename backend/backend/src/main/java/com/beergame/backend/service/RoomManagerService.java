@@ -20,12 +20,7 @@ import java.util.List;
 import java.util.stream.Stream;
 
 /**
- * Changes:
- *  1. broadcastRoomState() mid-transaction calls replaced with
- *     broadcastService.broadcastRoomAfterCommit() — same fix applied in
- *     GameService. Clients no longer receive partially-written state.
- *  2. startGame() uses generateFestiveWeeks() per game (no JVM-global static).
- *  3. RedisTemplate removed — broadcast goes through BroadcastService.
+ * Service class handling Room management lifecycle.
  */
 @Service
 @RequiredArgsConstructor
@@ -71,7 +66,6 @@ public class RoomManagerService {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Helpers
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
@@ -213,9 +207,6 @@ public class RoomManagerService {
             game.setCreatedAt(LocalDateTime.now());
             game.setGameRoom(room);
 
-            // FIX: generate per-game festive weeks instead of using the
-            // JVM-global static set. Each of the 4 games now has its own
-            // independent random festive schedule.
             game.setFestiveWeeks(GameConfig.generateFestiveWeeks());
             game.setFestiveWeek(GameConfig.isFestiveWeek(1, game.getFestiveWeeks()));
 
@@ -230,9 +221,6 @@ public class RoomManagerService {
                 Players.RoleType.MANUFACTURER
         };
 
-        // BUG 6 FIX: sort teams by teamName to make shuffle order deterministic.
-        // JPA does not guarantee order from JOIN FETCH — without this, the
-        // role-rotation formula (i+j)%4 produces inconsistent results across runs.
         List<Team> teamsList = room.getTeams().stream()
                 .sorted(java.util.Comparator.comparing(Team::getTeamName))
                 .collect(java.util.stream.Collectors.toList());
@@ -283,11 +271,6 @@ public class RoomManagerService {
             @Override
             public void afterCommit() {
                 for (Game g : committedGames) {
-                    // ✅ CRITICAL FIX: Call broadcastGameState() DIRECTLY here.
-                    // broadcastGameAfterCommit() registers a NEW TransactionSynchronization,
-                    // but we are ALREADY inside afterCommit — no active transaction exists!
-                    // Spring silently drops the nested registration, so game state was NEVER sent.
-                    // broadcastGameState(String) does a fresh DB read then sends to WebSocket — safe here.
                     broadcastService.broadcastGameState(g.getId());
                     eventPublisher.publishEvent(new WeekStartedEvent(RoomManagerService.this, g.getId(), 1));
                 }

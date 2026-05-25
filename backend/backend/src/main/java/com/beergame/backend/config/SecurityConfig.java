@@ -1,14 +1,11 @@
 package com.beergame.backend.config;
 
-// Make sure you have this new import
 import static org.springframework.security.config.Customizer.withDefaults;
 
-// Add these new imports for CORS
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
-// ---------------------------------
 import java.util.List;
 
 import org.springframework.context.annotation.Bean;
@@ -58,7 +55,6 @@ public class SecurityConfig {
         return authenticationConfiguration.getAuthenticationManager();
     }
 
-    // ✅ ADD THIS NEW BEAN
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
@@ -66,7 +62,7 @@ public class SecurityConfig {
         config.setAllowedOriginPatterns(List.of(
                 "http://localhost:3000",
                 "http://localhost:5173",
-                "https://beergamefrontend3.vercel.app" // 👈 FIXED — no wildcard
+                "https://beergamefrontend3.vercel.app"
         ));
 
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));

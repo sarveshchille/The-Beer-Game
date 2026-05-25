@@ -21,9 +21,6 @@ public record GameStateDTO(
                 .map(PlayerStateDTO::fromPlayer)
                 .collect(Collectors.toList());
 
-        // FIX: use the game's own festiveWeeks (stored in DB per-game)
-        // instead of GameConfig's JVM-global static set, which was shared
-        // across all games and made every game's festive weeks identical.
         List<Integer> festiveWeekList = GameConfig.getFestiveWeeksSorted(game.getFestiveWeeks());
 
         if (festiveWeekList.isEmpty()) {
